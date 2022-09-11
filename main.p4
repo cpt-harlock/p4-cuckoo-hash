@@ -5,6 +5,15 @@ typedef bit<9>  egressSpec_t;
 typedef bit<48> macAddr_t;
 typedef bit<32> ip4Addr_t;
 
+// Define constants for types of packets
+#define PKT_INSTANCE_TYPE_NORMAL 0
+#define PKT_INSTANCE_TYPE_INGRESS_CLONE 1
+#define PKT_INSTANCE_TYPE_EGRESS_CLONE 2
+#define PKT_INSTANCE_TYPE_COALESCED 3
+#define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
+#define PKT_INSTANCE_TYPE_REPLICATION 5
+#define PKT_INSTANCE_TYPE_RESUBMIT 6
+
 
 #define CH_LENGTH 512
 #define CH_LENGTH_BIT 16w512
@@ -16,7 +25,7 @@ register<bit<10>>(1) counter_reg;
 header ethernet_t {
     macAddr_t dstAddr;
     macAddr_t srcAddr;
-    bit<16>   etherType;
+    bit<16>   etherType; // == 0x0 when recirculating packet
 }
 
 header ipv4_t {
@@ -49,7 +58,8 @@ header tcp_t {
 }
 
 struct metadata {
-    /* empty */
+	@field_list(1)
+	bit<106> keyvalue;
 }
 
 struct headers {
@@ -110,61 +120,62 @@ control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
 control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
-    //action drop() {
-    //    mark_to_drop(standard_metadata);
-    //}
-
-    //action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-    //    /* TODO: fill out code in action body */
-    //}
-
-    //table ipv4_lpm {
-    //    key = {
-    //        hdr.ipv4.dstAddr: lpm;
-    //    }
-    //    actions = {
-    //        ipv4_forward;
-    //        drop;
-    //        NoAction;
-    //    }
-    //    size = 1024;
-    //    default_action = NoAction();
-    //}
-
-    //apply {
-    //    /* TODO: fix ingress control logic
-    //     *  - ipv4_lpm should be applied only when IPv4 header is valid
-    //     */
-    //    ipv4_lpm.apply();
-    //}
 
 	//compute CH indices
     apply {
-	bit<32> first_index;
-	bit<32> second_index;
-	bit<96> packet_key = hdr.ipv4.srcAddr ++ hdr.ipv4.dstAddr ++ hdr.tcp.srcPort ++ hdr.tcp.dstPort;
-	hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort }, 16w512);
-	hash(second_index, HashAlgorithm.crc16, 16w0, { 1w0, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort }, 16w512);
-	bit<106> first_result;
-	bit<106> second_result;
-	bit<10> counter_result;
-	ch_first_row.read(first_result, first_index);
-	ch_second_row.read(second_result, second_index);
-	if (first_result[95:0] == packet_key) {
-		//do nothing
-	} else if (second_result[95:0] == packet_key) {
-		//do nothing
-	} else if (first_result[95:0] == 96w0) {
-		counter_reg.read(counter_result, 0);
-		ch_first_row.write(first_index, counter_result ++ packet_key);
-		counter_reg.write(0, counter_result+1);
-	} else if (second_result[95:0] == 96w0) {
-		counter_reg.read(counter_result, 0);
-		ch_second_row.write(second_index, counter_result ++ packet_key);
-		counter_reg.write(0, counter_result+1);
-	} 
-	// TODO: implement recirculation!
+		bit<32> first_index;
+		bit<32> second_index;
+		bit<96> packet_key;
+		bit<10> counter_result;
+		bit<106> first_result;
+		bit<106> second_result;
+		bit<106> temp;
 
+		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
+			packet_key = hdr.ipv4.srcAddr ++ hdr.ipv4.dstAddr ++ hdr.tcp.srcPort ++ hdr.tcp.dstPort;
+			counter_reg.read(counter_result, 0);
+			counter_reg.write(0, counter_result+1);
+		} else {
+			packet_key = meta.keyvalue[95:0];
+			counter_result = meta.keyvalue[105:96];
+		}
+
+		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
+			hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, packet_key }, 16w512);
+			hash(second_index, HashAlgorithm.crc16, 16w0, { 1w0, packet_key }, 16w512);
+			ch_first_row.read(first_result, first_index);
+			ch_second_row.read(second_result, second_index);
+			if (first_result[95:0] == packet_key) {
+				return;
+			} else if (second_result[95:0] == packet_key) {
+				return;
+			} else if (first_result[95:0] == 96w0) {
+				ch_first_row.write(first_index, counter_result ++ packet_key);
+			} else if (second_result[95:0] == 96w0) {
+				ch_second_row.write(second_index, counter_result ++ packet_key);
+			} else {
+				meta.keyvalue = counter_result ++ packet_key;
+				resubmit_preserving_field_list(1);
+			}
+		} else {
+			//recirculation
+			hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, packet_key }, 16w512);
+			ch_first_row.read(first_result, first_index);
+			temp = first_result;
+			ch_first_row.write(first_index, counter_result ++ packet_key);
+			if (temp[95:0] != 96w0) {
+				hash(second_index, HashAlgorithm.crc16, 16w0, { 1w0, temp[95:0]}, 16w512);
+				ch_second_row.read(second_result, second_index);
+				ch_second_row.write(second_index, temp);
+				//just for coherence :)
+				temp = second_result;
+				if (temp[95:0] != 96w0) {
+					meta.keyvalue = temp;
+					resubmit_preserving_field_list(1);
+				}
+			}
+
+		} 
     }
 }
 
