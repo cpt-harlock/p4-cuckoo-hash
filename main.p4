@@ -85,7 +85,7 @@ parser MyParser(packet_in packet,
 		packet.extract(hdr.ethernet);
 		transition select(hdr.ethernet.etherType) {
 			0x0800: parse_ip;
-			default: reject;
+			default: rejection;
 		}
     }
 
@@ -93,12 +93,17 @@ parser MyParser(packet_in packet,
 		packet.extract(hdr.ipv4);
 		transition select(hdr.ipv4.protocol) {
 			0x6: parse_tcp;
-			default: reject;
+			default: rejection;
 		}
 	}
 
 	state parse_tcp {
 		packet.extract(hdr.tcp);
+		transition accept;
+	}
+
+	state rejection {
+		verify(false, error.ParserInvalidArgument);
 		transition accept;
 	}
 }
@@ -131,6 +136,11 @@ control MyIngress(inout headers hdr,
 		bit<106> second_result;
 		bit<106> temp;
 
+		if (standard_metadata.parser_error != error.NoError) {
+			mark_to_drop(standard_metadata);
+			//return should work as well
+			exit;
+		}
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
 			packet_key = hdr.ipv4.srcAddr ++ hdr.ipv4.dstAddr ++ hdr.tcp.srcPort ++ hdr.tcp.dstPort;
 			counter_reg.read(counter_result, 0);
@@ -154,9 +164,13 @@ control MyIngress(inout headers hdr,
 			} else if (second_result[95:0] == 96w0) {
 				ch_second_row.write(second_index, counter_result ++ packet_key);
 			} else {
+				//TODO: discover usage of session id	
+				//sending a packet duplicate to egress for switching
+				clone_preserving_field_list(CloneType.I2E, 32w500, 1);
 				meta.keyvalue = counter_result ++ packet_key;
 				resubmit_preserving_field_list(1);
 			}
+
 		} else {
 			//recirculation
 			hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, packet_key }, 16w512);
@@ -186,7 +200,11 @@ control MyIngress(inout headers hdr,
 control MyEgress(inout headers hdr,
                  inout metadata meta,
                  inout standard_metadata_t standard_metadata) {
-    apply {  }
+    apply { 
+
+	//TODO: do switching for non-recirculating packets
+
+    }
 }
 
 /*************************************************************************
