@@ -64,6 +64,8 @@ header tcp_t {
 struct metadata {
 	@field_list(1)
 	bit<106> keyvalue;
+	@field_list(1)
+	bit<3> recirculation_counter;
 }
 
 struct headers {
@@ -199,12 +201,18 @@ control MyIngress(inout headers hdr,
 			bit<32> recirculation_counter_value;
 			recirculation_counter.read(recirculation_counter_value, 0);
 			recirculation_counter.write(0, recirculation_counter_value + 1);
-			hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, packet_key }, 16w512);
+			meta.recirculation_counter = meta.recirculation_counter + 1;
+			if (meta.recirculation_counter == 7) {
+				mark_to_drop(standard_metadata);
+				return;
+			}
+			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, packet_key }, 32w512);
 			ch_first_row.read(first_result, first_index);
 			temp = first_result;
-			ch_first_row.write(first_index, counter_result ++ packet_key);
+			//ch_first_row.write(first_index, counter_result ++ packet_key);
+			ch_first_row.write(first_index, 10w0 ++ packet_key);
 			if (temp[95:0] != 96w0) {
-				hash(second_index, HashAlgorithm.crc16, 16w0, { 1w0, temp[95:0]}, 16w512);
+				hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, temp[95:0]}, 32w512);
 				ch_second_row.read(second_result, second_index);
 				ch_second_row.write(second_index, temp);
 				//just for coherence :)
@@ -214,7 +222,7 @@ control MyIngress(inout headers hdr,
 					resubmit_preserving_field_list(1);
 				} else {
 					inserted_keys.write(0, inserted_keys_read+1);
-				} 
+				}
 				mark_to_drop(standard_metadata);
 			} else {
 				inserted_keys.write(0, inserted_keys_read+1);
