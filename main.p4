@@ -21,6 +21,10 @@ typedef bit<32> ip4Addr_t;
 register<bit<106>>(CH_LENGTH) ch_first_row;
 register<bit<106>>(CH_LENGTH) ch_second_row;
 register<bit<10>>(1) counter_reg;
+register<bit<32>>(1) hit_counter;
+register<bit<96>>(1) last_key;
+register<bit<32>>(1) recirculation_counter;
+register<bit<32>>(1) inserted_keys;
 
 header ethernet_t {
     macAddr_t dstAddr;
@@ -63,7 +67,7 @@ struct metadata {
 }
 
 struct headers {
-    ethernet_t   ethernet;
+    //ethernet_t   ethernet;
     ipv4_t       ipv4;
     tcp_t	 tcp;
 }
@@ -78,16 +82,17 @@ parser MyParser(packet_in packet,
                 inout standard_metadata_t standard_metadata) {
 
     state start {
-        transition parse_ethernet;
+        transition parse_ip;
+        //transition parse_ethernet;
     }
 
-    state parse_ethernet { 
-		packet.extract(hdr.ethernet);
-		transition select(hdr.ethernet.etherType) {
-			0x0800: parse_ip;
-			default: rejection;
-		}
-    }
+    //state parse_ethernet { 
+    //    	packet.extract(hdr.ethernet);
+    //    	transition select(hdr.ethernet.etherType) {
+    //    		0x0800: parse_ip;
+    //    		default: rejection;
+    //    	}
+    //}
 
 	state parse_ip {
 		packet.extract(hdr.ipv4);
@@ -135,6 +140,9 @@ control MyIngress(inout headers hdr,
 		bit<106> first_result;
 		bit<106> second_result;
 		bit<106> temp;
+		bit<32> hit_counter_read;
+		bit<32> inserted_keys_read;
+
 
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
@@ -142,7 +150,9 @@ control MyIngress(inout headers hdr,
 			exit;
 		}
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
-			packet_key = hdr.ipv4.srcAddr ++ hdr.ipv4.dstAddr ++ hdr.tcp.srcPort ++ hdr.tcp.dstPort;
+			//packet_key = hdr.ipv4.srcAddr ++ hdr.ipv4.dstAddr ++ hdr.tcp.srcPort ++ hdr.tcp.dstPort;
+			//HACK
+			packet_key = 64w0 ++ hdr.ipv4.srcAddr;
 			counter_reg.read(counter_result, 0);
 			counter_reg.write(0, counter_result+1);
 		} else {
@@ -150,29 +160,45 @@ control MyIngress(inout headers hdr,
 			counter_result = meta.keyvalue[105:96];
 		}
 
+		last_key.write(0, packet_key) ;
+		inserted_keys.read(inserted_keys_read, 0);
+
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
-			hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, packet_key }, 16w512);
-			hash(second_index, HashAlgorithm.crc16, 16w0, { 1w0, packet_key }, 16w512);
+			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, packet_key }, 32w512);
+			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, 32w512);
 			ch_first_row.read(first_result, first_index);
 			ch_second_row.read(second_result, second_index);
+			hit_counter.read(hit_counter_read, 0);
 			if (first_result[95:0] == packet_key) {
-				return;
+				hit_counter.write(0, hit_counter_read + 1);
 			} else if (second_result[95:0] == packet_key) {
-				return;
+				hit_counter.write(0, hit_counter_read + 1);
 			} else if (first_result[95:0] == 96w0) {
-				ch_first_row.write(first_index, counter_result ++ packet_key);
+				//HACK
+				//ch_first_row.write(first_index, counter_result ++ packet_key);
+				ch_first_row.write(first_index, 10w0 ++ packet_key);
+				inserted_keys.write(0, inserted_keys_read+1);
 			} else if (second_result[95:0] == 96w0) {
-				ch_second_row.write(second_index, counter_result ++ packet_key);
+				//HACK
+				//ch_second_row.write(second_index, counter_result ++ packet_key);
+				ch_second_row.write(second_index, 10w0 ++ packet_key);
+				inserted_keys.write(0, inserted_keys_read+1);
 			} else {
 				//TODO: discover usage of session id	
 				//sending a packet duplicate to egress for switching
-				clone_preserving_field_list(CloneType.I2E, 32w500, 1);
-				meta.keyvalue = counter_result ++ packet_key;
+				//clone_preserving_field_list(CloneType.I2E, 32w500, 1);
+				//meta.keyvalue = counter_result ++ packet_key;
+				meta.keyvalue = 10w0 ++ packet_key;
 				resubmit_preserving_field_list(1);
 			}
+			// for the moment just drop the packet after CH operations
+			mark_to_drop(standard_metadata);
 
 		} else {
 			//recirculation
+			bit<32> recirculation_counter_value;
+			recirculation_counter.read(recirculation_counter_value, 0);
+			recirculation_counter.write(0, recirculation_counter_value + 1);
 			hash(first_index, HashAlgorithm.crc16, 16w0, { 0w0, packet_key }, 16w512);
 			ch_first_row.read(first_result, first_index);
 			temp = first_result;
@@ -186,7 +212,13 @@ control MyIngress(inout headers hdr,
 				if (temp[95:0] != 96w0) {
 					meta.keyvalue = temp;
 					resubmit_preserving_field_list(1);
-				}
+				} else {
+					inserted_keys.write(0, inserted_keys_read+1);
+				} 
+				mark_to_drop(standard_metadata);
+			} else {
+				inserted_keys.write(0, inserted_keys_read+1);
+				mark_to_drop(standard_metadata);	
 			}
 
 		} 
