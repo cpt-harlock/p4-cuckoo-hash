@@ -13,6 +13,7 @@ typedef bit<32> ip4Addr_t;
 #define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
 #define PKT_INSTANCE_TYPE_REPLICATION 5
 #define PKT_INSTANCE_TYPE_RESUBMIT 6
+#define LOOP_LIMIT 200
 
 
 #define CH_LENGTH 512
@@ -20,6 +21,8 @@ typedef bit<32> ip4Addr_t;
 // 106 bits per register, first 96 bits for key and others for value 
 register<bit<106>>(CH_LENGTH) ch_first_row;
 register<bit<106>>(CH_LENGTH) ch_second_row;
+register<bit<106>>(4) ch_stash;
+register<bit<3>>(1) ch_stash_counter;
 register<bit<10>>(1) counter_reg;
 register<bit<32>>(1) hit_counter;
 register<bit<96>>(1) last_key;
@@ -65,7 +68,7 @@ struct metadata {
 	@field_list(1)
 	bit<106> keyvalue;
 	@field_list(1)
-	bit<3> recirculation_counter;
+	bit<32> recirculation_counter;
 }
 
 struct headers {
@@ -139,13 +142,19 @@ control MyIngress(inout headers hdr,
 		bit<32> second_index;
 		bit<96> packet_key;
 		bit<10> counter_result;
+		bit<3> stash_counter_result;
 		bit<106> first_result;
 		bit<106> second_result;
+		bit<106> stash_result_0;
+		bit<106> stash_result_1;
+		bit<106> stash_result_2;
+		bit<106> stash_result_3;
 		bit<106> temp;
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
 
-
+		ch_stash_counter.read(stash_counter_result, 0);
+		
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
 			//return should work as well
@@ -170,10 +179,22 @@ control MyIngress(inout headers hdr,
 			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, 32w512);
 			ch_first_row.read(first_result, first_index);
 			ch_second_row.read(second_result, second_index);
+			ch_stash.read(stash_result_0, 0);
+			ch_stash.read(stash_result_1, 1);
+			ch_stash.read(stash_result_2, 2);
+			ch_stash.read(stash_result_3, 3);
 			hit_counter.read(hit_counter_read, 0);
 			if (first_result[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
 			} else if (second_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_result_0[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_result_1[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_result_2[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_result_3[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
 			} else if (first_result[95:0] == 96w0) {
 				//HACK
@@ -185,14 +206,16 @@ control MyIngress(inout headers hdr,
 				//ch_second_row.write(second_index, counter_result ++ packet_key);
 				ch_second_row.write(second_index, 10w0 ++ packet_key);
 				inserted_keys.write(0, inserted_keys_read+1);
-			} else {
-				//TODO: discover usage of session id	
-				//sending a packet duplicate to egress for switching
-				//clone_preserving_field_list(CloneType.I2E, 32w500, 1);
-				//meta.keyvalue = counter_result ++ packet_key;
-				meta.keyvalue = 10w0 ++ packet_key;
-				resubmit_preserving_field_list(1);
-			}
+			} else if (stash_counter_result < 4) {
+				// stash treated as a stack
+				ch_stash.write(29w0 ++ stash_counter_result, 10w0 ++ packet_key);
+				ch_stash_counter.write(0, stash_counter_result + 1);
+				inserted_keys.write(0, inserted_keys_read+1);
+				if (stash_counter_result + 1 == 3) {
+					resubmit_preserving_field_list(1);
+				}
+			} 
+			// else just drop the key!
 			// for the moment just drop the packet after CH operations
 			mark_to_drop(standard_metadata);
 
@@ -201,32 +224,41 @@ control MyIngress(inout headers hdr,
 			bit<32> recirculation_counter_value;
 			recirculation_counter.read(recirculation_counter_value, 0);
 			recirculation_counter.write(0, recirculation_counter_value + 1);
+			//leave the recirculation counter
 			meta.recirculation_counter = meta.recirculation_counter + 1;
-			if (meta.recirculation_counter == 7) {
+			if (meta.recirculation_counter == LOOP_LIMIT) {
 				mark_to_drop(standard_metadata);
 				return;
 			}
-			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, packet_key }, 32w512);
+			//evict a key from the stash
+			ch_stash.read(temp, 29w0 ++  (stash_counter_result - 1));
+			ch_stash.write(29w0 ++ (stash_counter_result - 1), 0);
+			ch_stash_counter.write(0, stash_counter_result - 1);
+			//insert temp into first ch row and sub with old value
+			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, temp[95:0]}, 32w512);
 			ch_first_row.read(first_result, first_index);
+			ch_first_row.write(first_index, temp);
 			temp = first_result;
-			//ch_first_row.write(first_index, counter_result ++ packet_key);
-			ch_first_row.write(first_index, 10w0 ++ packet_key);
 			if (temp[95:0] != 96w0) {
 				hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, temp[95:0]}, 32w512);
 				ch_second_row.read(second_result, second_index);
 				ch_second_row.write(second_index, temp);
-				//just for coherence :)
 				temp = second_result;
 				if (temp[95:0] != 96w0) {
-					meta.keyvalue = temp;
+					ch_stash_counter.read(stash_counter_result, 0);
+					ch_stash.write(29w0 ++ stash_counter_result, temp);
+					ch_stash_counter.write(0, stash_counter_result + 1);
 					resubmit_preserving_field_list(1);
-				} else {
-					inserted_keys.write(0, inserted_keys_read+1);
-				}
+				} 
 				mark_to_drop(standard_metadata);
 			} else {
-				inserted_keys.write(0, inserted_keys_read+1);
 				mark_to_drop(standard_metadata);	
+			}
+
+			// recirculate trying to free the stash
+			ch_stash_counter.read(stash_counter_result, 0);
+			if (stash_counter_result > 0) {
+				resubmit_preserving_field_list(1);
 			}
 
 		} 

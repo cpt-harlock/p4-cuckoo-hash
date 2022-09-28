@@ -39,4 +39,9 @@ cuckoo_first:
 	echo register_read  ch_first_row | sudo simple_switch_CLI --thrift-port 9091
 cuckoo_second:
 	echo register_read  ch_second_row | sudo simple_switch_CLI --thrift-port 9091
-
+cuckoo_stash:
+	echo register_read  ch_stash | sudo simple_switch_CLI --thrift-port 9091
+cuckoo_stash_counter:
+	echo register_read  ch_stash_counter | sudo simple_switch_CLI --thrift-port 9091
+inserted_keys_true:
+	echo `make cuckoo_first 2>/dev/null | egrep -o " 0" | wc -l` + `make cuckoo_second 2>/dev/null | egrep -o " 0" | wc -l` 
