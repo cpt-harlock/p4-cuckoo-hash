@@ -42,79 +42,79 @@ register<bit<32>>(1) recirculation_counter;
 register<bit<32>>(1) inserted_keys;
 
 header ethernet_t {
-    macAddr_t dstAddr;
-    macAddr_t srcAddr;
-    bit<16>   etherType; // == 0x0 when recirculating packet
+	macAddr_t dstAddr;
+	macAddr_t srcAddr;
+	bit<16>   etherType; // == 0x0 when recirculating packet
 }
 
 header ipv4_t {
-    bit<4>    version;
-    bit<4>    ihl;
-    bit<8>    diffserv;
-    bit<16>   totalLen;
-    bit<16>   identification;
-    bit<3>    flags;
-    bit<13>   fragOffset;
-    bit<8>    ttl;
-    bit<8>    protocol;
-    bit<16>   hdrChecksum;
-    ip4Addr_t srcAddr;
-    ip4Addr_t dstAddr;
+	bit<4>    version;
+	bit<4>    ihl;
+	bit<8>    diffserv;
+	bit<16>   totalLen;
+	bit<16>   identification;
+	bit<3>    flags;
+	bit<13>   fragOffset;
+	bit<8>    ttl;
+	bit<8>    protocol;
+	bit<16>   hdrChecksum;
+	ip4Addr_t srcAddr;
+	ip4Addr_t dstAddr;
 }
 
 header tcp_t {
-    bit<16> srcPort;
-    bit<16> dstPort;
-    bit<32> seqNo;
-    bit<32> ackNo;
-    bit<4>  dataOffset;
-    bit<3>  res;
-    bit<3>  ecn;
-    bit<6>  ctrl;
-    bit<16> window;
-    bit<16> checksum;
-    bit<16> urgentPtr;
+	bit<16> srcPort;
+	bit<16> dstPort;
+	bit<32> seqNo;
+	bit<32> ackNo;
+	bit<4>  dataOffset;
+	bit<3>  res;
+	bit<3>  ecn;
+	bit<6>  ctrl;
+	bit<16> window;
+	bit<16> checksum;
+	bit<16> urgentPtr;
 }
 
 struct metadata {
 	@field_list(1)
-	bit<106> keyvalue;
+		bit<106> keyvalue;
 	@field_list(1)
-	bit<32> recirculation_counter;
+		bit<32> recirculation_counter;
 }
 
 struct headers {
-    //ethernet_t   ethernet;
-    ipv4_t       ipv4;
-    tcp_t	 tcp;
+	//ethernet_t   ethernet;
+	ipv4_t       ipv4;
+	tcp_t	 tcp;
 }
 
 /*************************************************************************
-*********************** P A R S E R  ***********************************
-*************************************************************************/
+ *********************** P A R S E R  ***********************************
+ *************************************************************************/
 
 parser MyParser(packet_in packet,
-                out headers hdr,
-                inout metadata meta,
-                inout standard_metadata_t standard_metadata) {
+		out headers hdr,
+		inout metadata meta,
+		inout standard_metadata_t standard_metadata) {
 
-    state start {
-        transition parse_ip;
-        //transition parse_ethernet;
-    }
+	state start {
+		transition parse_ip;
+		//transition parse_ethernet;
+	}
 
-    //state parse_ethernet { 
-    //    	packet.extract(hdr.ethernet);
-    //    	transition select(hdr.ethernet.etherType) {
-    //    		0x0800: parse_ip;
-    //    		default: rejection;
-    //    	}
-    //}
+	//state parse_ethernet { 
+	//    	packet.extract(hdr.ethernet);
+	//    	transition select(hdr.ethernet.etherType) {
+	//    		0x0800: parse_ip;
+	//    		default: rejection;
+	//    	}
+	//}
 
 	state parse_ip {
 		packet.extract(hdr.ipv4);
 		transition select(hdr.ipv4.protocol) {
-			0x6: parse_tcp;
+0x6: parse_tcp;
 			default: rejection;
 		}
 	}
@@ -132,24 +132,24 @@ parser MyParser(packet_in packet,
 
 
 /*************************************************************************
-************   C H E C K S U M    V E R I F I C A T I O N   *************
-*************************************************************************/
+ ************   C H E C K S U M    V E R I F I C A T I O N   *************
+ *************************************************************************/
 
 control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
-    apply {  }
+	apply {  }
 }
 
 
 /*************************************************************************
-**************  I N G R E S S   P R O C E S S I N G   *******************
-*************************************************************************/
+ **************  I N G R E S S   P R O C E S S I N G   *******************
+ *************************************************************************/
 
 control MyIngress(inout headers hdr,
-                  inout metadata meta,
-                  inout standard_metadata_t standard_metadata) {
+		inout metadata meta,
+		inout standard_metadata_t standard_metadata) {
 
 	//compute CH indices
-    apply {
+	apply {
 		bit<32> first_index;
 		bit<32> second_index;
 		bit<96> packet_key;
@@ -162,13 +162,13 @@ control MyIngress(inout headers hdr,
 		bit<106> stash_result_2;
 		bit<106> stash_result_3;
 		bit<106> temp;
-		bit<106> stash_evicted_0;
 		bit<106> stash_evicted_1;
+		bit<106> stash_evicted_2;
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
 
 		ch_stash_counter.read(stash_counter_result, 0);
-		
+
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
 			//return should work as well
@@ -192,17 +192,17 @@ control MyIngress(inout headers hdr,
 			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, packet_key }, CH_LENGTH_BIT);
 			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, CH_LENGTH_BIT);
 
-			if (first_index[0]==0) {
-				ch_first_row_even.read(first_result, first_index[31:1]);
+			if (first_index[0:0]==0) {
+				ch_first_row_even.read(first_result, 1w0 ++ first_index[31:1]);
 			}
 			else {
-				ch_first_row_odd.read(first_result, first_index[31:1]);
+				ch_first_row_odd.read(first_result, 1w0 ++ first_index[31:1]);
 			}
-			if (second_index[0]==0) {
-				ch_second_row_even.read(second_result, second_index[31:1]);
+			if (second_index[0:0]==0) {
+				ch_second_row_even.read(second_result, 1w0 ++ second_index[31:1]);
 			}
 			else {
-				ch_second_row_odd.read(second_result, second_index[31:1]);
+				ch_second_row_odd.read(second_result, 1w0 ++ second_index[31:1]);
 			}
 			ch_stash.read(stash_result_0, 0);
 			ch_stash.read(stash_result_1, 1);
@@ -224,21 +224,21 @@ control MyIngress(inout headers hdr,
 			} else if (first_result[95:0] == 96w0) {
 				//HACK
 				//ch_first_row.write(first_index, counter_result ++ packet_key);
-				if (first_index[0]==0) {
-					ch_first_row_even.write(first_index[31:1], 10w0 ++ packet_key);
+				if (first_index[0:0]==0) {
+					ch_first_row_even.write(1w0 ++ first_index[31:1], 10w0 ++ packet_key);
 				}
 				else {
-					ch_first_row_odd.write(first_index[31:1], 10w0 ++ packet_key);
+					ch_first_row_odd.write(1w0 ++ first_index[31:1], 10w0 ++ packet_key);
 				}	
 				inserted_keys.write(0, inserted_keys_read+1);
 			} else if (second_result[95:0] == 96w0) {
 				//HACK
 				//ch_second_row.write(second_index, counter_result ++ packet_key);
-				if (first_index[0]==0) {
-					ch_second_row_even.write(second_index[31:1], 10w0 ++ packet_key);
+				if (first_index[0:0]==0) {
+					ch_second_row_even.write(1w0 ++ second_index[31:1], 10w0 ++ packet_key);
 				}
 				else {
-					ch_second_row_odd.write(second_index[31:1], 10w0 ++ packet_key);
+					ch_second_row_odd.write(1w0 ++ second_index[31:1], 10w0 ++ packet_key);
 				}	
 				inserted_keys.write(0, inserted_keys_read+1);
 			} else if (stash_counter_result < 4) {
@@ -278,37 +278,37 @@ control MyIngress(inout headers hdr,
 			//evict 2 keys from the stash
 			ch_stash.read(stash_evicted_1, 29w0 ++  (stash_counter_result - 1));
 			ch_stash.read(stash_evicted_2, 29w0 ++  (stash_counter_result - 2));
-			ch_stash_counter.write(stash_counter_result - 2, 0);
+			ch_stash_counter.write(0, stash_counter_result - 2);
 			//compute two hash per key
 			hash(evicted_1_hash_first, HashAlgorithm.crc32, 32w0, { 0w0, stash_evicted_1[95:0]}, CH_LENGTH_BIT);
 			hash(evicted_2_hash_first, HashAlgorithm.crc32, 32w0, { 0w0, stash_evicted_2[95:0]}, CH_LENGTH_BIT);
-			
+
 			//access two different memories
-			if (evicted_1_hash_first[0] != evicted_2_hash_first[0] ) {
+			if (evicted_1_hash_first[0:0] != evicted_2_hash_first[0:0] ) {
 				//insert stash elements into ch 1 and evict corresponding values
-				if (evicted_1_hash_first[0] == 0 ) {
-					ch_first_row_even.read(evicted_1_hash_first[31:1], evicted_1_ch_first);
-					ch_first_row_even.write(stash_evicted_1, evicted_1_hash_first[31:1]);
+				if (evicted_1_hash_first[0:0] == 0 ) {
+					ch_first_row_even.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1]);
+					ch_first_row_even.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
 				} else {
-					ch_first_row_odd.read(evicted_1_hash_first[31:1], evicted_1_ch_first);
-					ch_first_row_odd.write(stash_evicted_1, evicted_1_hash_first[31:1]);
+					ch_first_row_odd.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1]);
+					ch_first_row_odd.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
 				}
-				if (evicted_2_hash_first[0] == 0 ) {
-					ch_first_row_even.read(evicted_2_hash_first[31:1], evicted_2_ch_first);
-					ch_first_row_even.write(stash_evicted_2, evicted_2_hash_first[31:1]);
+				if (evicted_2_hash_first[0:0] == 0 ) {
+					ch_first_row_even.read(evicted_2_ch_first, 1w0 ++ evicted_2_hash_first[31:1]);
+					ch_first_row_even.write(1w0 ++ evicted_2_hash_first[31:1], stash_evicted_2);
 				} else {
-					ch_first_row_odd.read(evicted_2_hash_first[31:1], evicted_2_ch_first);
-					ch_first_row_odd.write(stash_evicted_2, evicted_2_hash_first[31:1]);
+					ch_first_row_odd.read(evicted_2_ch_first, 1w0 ++ evicted_2_hash_first[31:1]);
+					ch_first_row_odd.write(1w0 ++ evicted_2_hash_first[31:1], stash_evicted_2);
 				}
 			} 
 			// else insert only first key
 			else {
-				if (evicted_1_hash_first[0] == 0 ) {
-					ch_first_row_even.read(evicted_1_hash_first[31:1], evicted_1_ch_first);
-					ch_first_row_even.write(stash_evicted_1, evicted_1_hash_first[31:1]);
+				if (evicted_1_hash_first[0:0] == 0 ) {
+					ch_first_row_even.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1]);
+					ch_first_row_even.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
 				} else {
-					ch_first_row_odd.read(evicted_1_hash_first[31:1], evicted_1_ch_first);
-					ch_first_row_odd.write(stash_evicted_1, evicted_1_hash_first[31:1]);
+					ch_first_row_odd.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1] );
+					ch_first_row_odd.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
 				}
 				// second key evicted from stash become the second key evicted from ch first, for code coherence
 				evicted_2_ch_first = stash_evicted_2;
@@ -323,94 +323,94 @@ control MyIngress(inout headers hdr,
 				hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
 				// access to different halves -> both inserted 	
 				// if we can access two different locations ... 
-				if (evicted_1_hash_second[0] != evicted_2_hash_second[0]) {
+				if (evicted_1_hash_second[0:0] != evicted_2_hash_second[0:0]) {
 					// substitute values
-					if (evicted_1_hash_second[0] == 0) {
-						ch_second_row_even.read(evicted_1_hash_second[31:1], evicted_1_ch_second);
-						ch_second_row_even.write(evicted_1_ch_first, evicted_1_hash_second[31:1]);
+					if (evicted_1_hash_second[0:0] == 0) {
+						ch_second_row_even.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
+						ch_second_row_even.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
 					} else {
-						ch_second_row_odd.read(evicted_1_hash_second[31:1], evicted_1_ch_second);
-						ch_second_row_odd.write(evicted_1_ch_first, evicted_1_hash_second[31:1]);
+						ch_second_row_odd.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
+						ch_second_row_odd.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
 					}
-					if (evicted_2_hash_second[0] == 0) {
-						ch_second_row_even.read(evicted_2_hash_second[31:1], evicted_2_ch_second);
-						ch_second_row_even.write(evicted_2_ch_first, evicted_2_hash_second[31:1]);
+					if (evicted_2_hash_second[0:0] == 0) {
+						ch_second_row_even.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
+						ch_second_row_even.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
 					} else {
-						ch_second_row_odd.read(evicted_2_hash_second[31:1], evicted_2_ch_second);
-						ch_second_row_odd.write(evicted_2_ch_first, evicted_2_hash_second[31:1]);
+						ch_second_row_odd.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
+						ch_second_row_odd.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
 					}
 					// save the eviction into the stash	
-					ch_stash_counter.read(0, stash_counter_result);
-					ch_stash.write(evicted_1_ch_second, stash_counter_result);
-					ch_stash.write(evicted_2_ch_second, stash_counter_result + 1);
+					ch_stash_counter.read(stash_counter_result, 0);
+					ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
+					ch_stash.write(29w0 ++ stash_counter_result + 1, evicted_2_ch_second);
 					// if read values are != 0, update stash counter
 					if ( evicted_1_ch_second[95:0] != 0 ) {
-						stash_counter_result += 1;
+						stash_counter_result = stash_counter_result + 1;
 					}
 					if ( evicted_2_ch_second[95:0] != 0 ) {
-						stash_counter_result += 1;
+						stash_counter_result = stash_counter_result + 1;
 					}
-					ch_stash_counter.write(stash_counter_result, 0);
+					ch_stash_counter.write(0, stash_counter_result);
 				} 
 				// else only access location for first key and save the other into the stash
 				else {
 					// insert only the first key
-					if (evicted_1_hash_second[0] == 0) {
-						ch_second_row_even.read(evicted_1_hash_second[31:1], evicted_1_ch_second);
-						ch_second_row_even.write(evicted_1_ch_first, evicted_1_hash_second[31:1]);
+					if (evicted_1_hash_second[0:0] == 0) {
+						ch_second_row_even.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
+						ch_second_row_even.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
 					} else {
-						ch_second_row_odd.read(evicted_1_hash_second[31:1], evicted_1_ch_second);
-						ch_second_row_odd.write(evicted_1_ch_first, evicted_1_hash_second[31:1]);
+						ch_second_row_odd.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
+						ch_second_row_odd.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
 					}
-					ch_stash_counter.read(0, stash_counter_result);
-					ch_stash.write(evicted_1_ch_second, stash_counter_result);
+					ch_stash_counter.read(stash_counter_result, 0);
+					ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
 					//save into the stash the second key read from first ch
-					ch_stash.write(evicted_2_ch_first, stash_counter_result + 1);
+					ch_stash.write(29w0 ++ (stash_counter_result + 1), evicted_2_ch_first);
 					if ( evicted_1_ch_second[95:0] != 0 ) {
-						stash_counter_result += 1;
+						stash_counter_result = stash_counter_result + 1;
 					}
 					if ( evicted_2_ch_first[95:0] != 0 ) {
-						stash_counter_result += 1;
+						stash_counter_result = stash_counter_result + 1;
 					}
-					ch_stash_counter.write(stash_counter_result, 0);
+					ch_stash_counter.write(0, stash_counter_result);
 				}
 			} 
 			// only first  evicted key from ch 1 is different from 0
 			else if (evicted_1_ch_first[95:0] != 0) {
 				// only check first value
 				hash(evicted_1_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_1_ch_first[95:0]}, CH_LENGTH_BIT);
-				if (evicted_1_hash_second[0] == 0) {
-					ch_second_row_even.read(evicted_1_hash_second[31:1], evicted_1_ch_second);
-					ch_second_row_even.write(evicted_1_ch_first, evicted_1_hash_second[31:1]);
+				if (evicted_1_hash_second[0:0] == 0) {
+					ch_second_row_even.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
+					ch_second_row_even.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
 				} else {
-					ch_second_row_odd.read(evicted_1_hash_second[31:1], evicted_1_ch_second);
-					ch_second_row_odd.write(evicted_1_ch_first, evicted_1_hash_second[31:1]);
+					ch_second_row_odd.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
+					ch_second_row_odd.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
 				}
-				ch_stash_counter.read(0, stash_counter_result);
-				ch_stash.write(evicted_1_ch_second, stash_counter_result);
+				ch_stash_counter.read(stash_counter_result, 0);
+				ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
 				//writing 0 into the stash
-				ch_stash.write(evicted_2_ch_first, stash_counter_result + 1);
+				ch_stash.write(29w0 ++ (stash_counter_result + 1), evicted_2_ch_first);
 				if ( evicted_1_ch_second[95:0] != 0 ) {
-					stash_counter_result += 1;
+					stash_counter_result = stash_counter_result + 1;
 				}
-				ch_stash_counter.write(stash_counter_result, 0);
+				ch_stash_counter.write(0, stash_counter_result);
 			} else if (evicted_2_ch_first[95:0] != 0) {
 				hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
-				if (evicted_2_hash_second[0] == 0) {
-					ch_second_row_even.read(evicted_2_hash_second[31:1], evicted_2_ch_second);
-					ch_second_row_even.write(evicted_2_ch_first, evicted_2_hash_second[31:1]);
+				if (evicted_2_hash_second[0:0] == 0) {
+					ch_second_row_even.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
+					ch_second_row_even.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
 				} else {
-					ch_second_row_odd.read(evicted_2_hash_second[31:1], evicted_2_ch_second);
-					ch_second_row_odd.write(evicted_2_ch_first, evicted_2_hash_second[31:1]);
+					ch_second_row_odd.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
+					ch_second_row_odd.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
 				}
-				ch_stash_counter.read(0, stash_counter_result);
+				ch_stash_counter.read(stash_counter_result, 0);
 				//writing 0 into the stash
-				ch_stash.write(evicted_1_ch_first, stash_counter_result);
-				ch_stash.write(evicted_2_ch_second, stash_counter_result + 1);
+				ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_first);
+				ch_stash.write(29w0 ++ (stash_counter_result + 1), evicted_2_ch_second);
 				if ( evicted_2_ch_second[95:0] != 0 ) {
-					stash_counter_result += 1;
+					stash_counter_result = stash_counter_result + 1;
 				}
-				ch_stash_counter.write(stash_counter_result, 0);
+				ch_stash_counter.write(0, stash_counter_result);
 			} else {
 				// greetings, both insertions worked on first ch!
 			}
@@ -421,67 +421,67 @@ control MyIngress(inout headers hdr,
 				resubmit_preserving_field_list(1);
 			}
 		} 
-    }
+	}
 }
 
 /*************************************************************************
-****************  E G R E S S   P R O C E S S I N G   *******************
-*************************************************************************/
+ ****************  E G R E S S   P R O C E S S I N G   *******************
+ *************************************************************************/
 
 control MyEgress(inout headers hdr,
-                 inout metadata meta,
-                 inout standard_metadata_t standard_metadata) {
-    apply { 
+		inout metadata meta,
+		inout standard_metadata_t standard_metadata) {
+	apply { 
 
-	//TODO: do switching for non-recirculating packets
+		//TODO: do switching for non-recirculating packets
 
-    }
+	}
 }
 
 /*************************************************************************
-*************   C H E C K S U M    C O M P U T A T I O N   **************
-*************************************************************************/
+ *************   C H E C K S U M    C O M P U T A T I O N   **************
+ *************************************************************************/
 
 control MyComputeChecksum(inout headers hdr, inout metadata meta) {
-     apply {
-        update_checksum(
-            hdr.ipv4.isValid(),
-            { hdr.ipv4.version,
-              hdr.ipv4.ihl,
-              hdr.ipv4.diffserv,
-              hdr.ipv4.totalLen,
-              hdr.ipv4.identification,
-              hdr.ipv4.flags,
-              hdr.ipv4.fragOffset,
-              hdr.ipv4.ttl,
-              hdr.ipv4.protocol,
-              hdr.ipv4.srcAddr,
-              hdr.ipv4.dstAddr },
-            hdr.ipv4.hdrChecksum,
-            HashAlgorithm.csum16);
-    }
+	apply {
+		update_checksum(
+				hdr.ipv4.isValid(),
+				{ hdr.ipv4.version,
+				hdr.ipv4.ihl,
+				hdr.ipv4.diffserv,
+				hdr.ipv4.totalLen,
+				hdr.ipv4.identification,
+				hdr.ipv4.flags,
+				hdr.ipv4.fragOffset,
+				hdr.ipv4.ttl,
+				hdr.ipv4.protocol,
+				hdr.ipv4.srcAddr,
+				hdr.ipv4.dstAddr },
+				hdr.ipv4.hdrChecksum,
+				HashAlgorithm.csum16);
+	}
 }
 
 
 /*************************************************************************
-***********************  D E P A R S E R  *******************************
-*************************************************************************/
+ ***********************  D E P A R S E R  *******************************
+ *************************************************************************/
 
 control MyDeparser(packet_out packet, in headers hdr) {
-    apply {
-        /* TODO: add deparser logic */
-    }
+	apply {
+		/* TODO: add deparser logic */
+	}
 }
 
 /*************************************************************************
-***********************  S W I T C H  *******************************
-*************************************************************************/
+ ***********************  S W I T C H  *******************************
+ *************************************************************************/
 
-V1Switch(
-MyParser(),
-MyVerifyChecksum(),
-MyIngress(),
-MyEgress(),
-MyComputeChecksum(),
-MyDeparser()
-) main;
+	V1Switch(
+			MyParser(),
+			MyVerifyChecksum(),
+			MyIngress(),
+			MyEgress(),
+			MyComputeChecksum(),
+			MyDeparser()
+		) main;
