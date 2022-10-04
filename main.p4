@@ -13,7 +13,7 @@ typedef bit<32> ip4Addr_t;
 #define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
 #define PKT_INSTANCE_TYPE_REPLICATION 5
 #define PKT_INSTANCE_TYPE_RESUBMIT 6
-#define LOOP_LIMIT 200
+#define LOOP_LIMIT 2000
 
 
 #define CH_LENGTH 512
@@ -28,6 +28,7 @@ register<bit<32>>(1) hit_counter;
 register<bit<96>>(1) last_key;
 register<bit<32>>(1) recirculation_counter;
 register<bit<32>>(1) inserted_keys;
+register<bit<32>>(1) discarded_keys;
 
 header ethernet_t {
     macAddr_t dstAddr;
@@ -214,7 +215,11 @@ control MyIngress(inout headers hdr,
 				if (stash_counter_result + 1 == 3) {
 					resubmit_preserving_field_list(1);
 				}
-			} 
+			} else {
+				bit<32> read_discarded_keys;
+				discarded_keys.read(read_discarded_keys, 0);
+				discarded_keys.write(0, read_discarded_keys+1);
+			}
 			// else just drop the key!
 			// for the moment just drop the packet after CH operations
 			mark_to_drop(standard_metadata);

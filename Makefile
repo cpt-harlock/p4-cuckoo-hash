@@ -35,6 +35,8 @@ recirculation:
 	echo register_read  recirculation_counter  | sudo simple_switch_CLI --thrift-port 9091
 hit:
 	echo register_read  hit_counter  | sudo simple_switch_CLI --thrift-port 9091
+discarded:
+	echo register_read  discarded_keys | sudo simple_switch_CLI --thrift-port 9091
 cuckoo_first:
 	echo register_read  ch_first_row | sudo simple_switch_CLI --thrift-port 9091
 cuckoo_second:
