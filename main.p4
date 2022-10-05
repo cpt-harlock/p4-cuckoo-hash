@@ -40,6 +40,9 @@ register<bit<32>>(1) hit_counter;
 register<bit<96>>(1) last_key;
 register<bit<32>>(1) recirculation_counter;
 register<bit<32>>(1) inserted_keys;
+register<bit<32>>(1) discarded_keys;
+register<bit<32>>(1) debug;
+register<bit<32>>(1) debug_1;
 
 header ethernet_t {
 	macAddr_t dstAddr;
@@ -190,19 +193,20 @@ control MyIngress(inout headers hdr,
 
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
 			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, packet_key }, CH_LENGTH_BIT);
-			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, CH_LENGTH_BIT);
+			hash(second_index, HashAlgorithm.crc32, 32w0, { 24w0, packet_key }, CH_LENGTH_BIT);
+			//debug.write(0, first_index);
 
-			if (first_index[0:0]==0) {
-				ch_first_row_even.read(first_result, 1w0 ++ first_index[31:1]);
+			if (first_index[8:8]==0) {
+				ch_first_row_even.read(first_result, 24w0 ++ first_index[7:0]);
 			}
 			else {
-				ch_first_row_odd.read(first_result, 1w0 ++ first_index[31:1]);
+				ch_first_row_odd.read(first_result, 24w0 ++ first_index[7:0]);
 			}
-			if (second_index[0:0]==0) {
-				ch_second_row_even.read(second_result, 1w0 ++ second_index[31:1]);
+			if (second_index[8:8]==0) {
+				ch_second_row_even.read(second_result, 24w0 ++ second_index[7:0]);
 			}
 			else {
-				ch_second_row_odd.read(second_result, 1w0 ++ second_index[31:1]);
+				ch_second_row_odd.read(second_result, 24w0 ++ second_index[7:0]);
 			}
 			ch_stash.read(stash_result_0, 0);
 			ch_stash.read(stash_result_1, 1);
@@ -222,34 +226,36 @@ control MyIngress(inout headers hdr,
 			} else if (stash_result_3[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
 			} else if (first_result[95:0] == 96w0) {
-				//HACK
-				//ch_first_row.write(first_index, counter_result ++ packet_key);
-				if (first_index[0:0]==0) {
-					ch_first_row_even.write(1w0 ++ first_index[31:1], 10w0 ++ packet_key);
+				if (first_index[8:8]==0) {
+					ch_first_row_even.write(24w0 ++ first_index[7:0], 10w0 ++ packet_key);
 				}
 				else {
-					ch_first_row_odd.write(1w0 ++ first_index[31:1], 10w0 ++ packet_key);
+					ch_first_row_odd.write(24w0 ++ first_index[7:0], 10w0 ++ packet_key);
 				}	
 				inserted_keys.write(0, inserted_keys_read+1);
 			} else if (second_result[95:0] == 96w0) {
-				//HACK
-				//ch_second_row.write(second_index, counter_result ++ packet_key);
-				if (first_index[0:0]==0) {
-					ch_second_row_even.write(1w0 ++ second_index[31:1], 10w0 ++ packet_key);
+				if (second_index[8:8]==0) {
+					ch_second_row_even.write(24w0 ++ second_index[7:0], 10w0 ++ packet_key);
 				}
 				else {
-					ch_second_row_odd.write(1w0 ++ second_index[31:1], 10w0 ++ packet_key);
+					ch_second_row_odd.write(24w0 ++ second_index[7:0], 10w0 ++ packet_key);
 				}	
 				inserted_keys.write(0, inserted_keys_read+1);
-			} else if (stash_counter_result < 4) {
+			} 
+			else if (stash_counter_result < 4) {
 				// stash treated as a stack
 				ch_stash.write(29w0 ++ stash_counter_result, 10w0 ++ packet_key);
 				ch_stash_counter.write(0, stash_counter_result + 1);
 				inserted_keys.write(0, inserted_keys_read+1);
-				if (stash_counter_result + 1 > 1) {
+				if (stash_counter_result + 1 ==  4) {
 					resubmit_preserving_field_list(1);
 				}
 			} 
+			else {
+				bit<32> discarded_keys_read;
+				discarded_keys.read(discarded_keys_read, 0);
+				discarded_keys.write(0, discarded_keys_read + 1);
+			}
 			// else just drop the key!
 			// for the moment just drop the packet after CH operations
 			mark_to_drop(standard_metadata);
@@ -270,12 +276,13 @@ control MyIngress(inout headers hdr,
 			recirculation_counter.read(recirculation_counter_value, 0);
 			recirculation_counter.write(0, recirculation_counter_value + 1);
 			//leave the recirculation counter
-			meta.recirculation_counter = meta.recirculation_counter + 1;
 			if (meta.recirculation_counter == LOOP_LIMIT) {
 				mark_to_drop(standard_metadata);
 				return;
 			}
+			meta.recirculation_counter = meta.recirculation_counter + 1;
 			//evict 2 keys from the stash
+			ch_stash_counter.read(stash_counter_result, 0);
 			ch_stash.read(stash_evicted_1, 29w0 ++  (stash_counter_result - 1));
 			ch_stash.read(stash_evicted_2, 29w0 ++  (stash_counter_result - 2));
 			ch_stash_counter.write(0, stash_counter_result - 2);
@@ -284,31 +291,31 @@ control MyIngress(inout headers hdr,
 			hash(evicted_2_hash_first, HashAlgorithm.crc32, 32w0, { 0w0, stash_evicted_2[95:0]}, CH_LENGTH_BIT);
 
 			//access two different memories
-			if (evicted_1_hash_first[0:0] != evicted_2_hash_first[0:0] ) {
+			if (evicted_1_hash_first[8:8] != evicted_2_hash_first[8:8] ) {
 				//insert stash elements into ch 1 and evict corresponding values
-				if (evicted_1_hash_first[0:0] == 0 ) {
-					ch_first_row_even.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1]);
-					ch_first_row_even.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
+				if (evicted_1_hash_first[8:8] == 0 ) {
+					ch_first_row_even.read(evicted_1_ch_first, 24w0 ++ evicted_1_hash_first[7:0]);
+					ch_first_row_even.write(24w0 ++ evicted_1_hash_first[7:0], stash_evicted_1);
 				} else {
-					ch_first_row_odd.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1]);
-					ch_first_row_odd.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
+					ch_first_row_odd.read(evicted_1_ch_first, 24w0 ++ evicted_1_hash_first[7:0]);
+					ch_first_row_odd.write(24w0 ++ evicted_1_hash_first[7:0], stash_evicted_1);
 				}
-				if (evicted_2_hash_first[0:0] == 0 ) {
-					ch_first_row_even.read(evicted_2_ch_first, 1w0 ++ evicted_2_hash_first[31:1]);
-					ch_first_row_even.write(1w0 ++ evicted_2_hash_first[31:1], stash_evicted_2);
+				if (evicted_2_hash_first[8:8] == 0 ) {
+					ch_first_row_even.read(evicted_2_ch_first, 24w0 ++ evicted_2_hash_first[7:0]);
+					ch_first_row_even.write(24w0 ++ evicted_2_hash_first[7:0], stash_evicted_2);
 				} else {
-					ch_first_row_odd.read(evicted_2_ch_first, 1w0 ++ evicted_2_hash_first[31:1]);
-					ch_first_row_odd.write(1w0 ++ evicted_2_hash_first[31:1], stash_evicted_2);
+					ch_first_row_odd.read(evicted_2_ch_first, 24w0 ++ evicted_2_hash_first[7:0]);
+					ch_first_row_odd.write(24w0 ++ evicted_2_hash_first[7:0], stash_evicted_2);
 				}
 			} 
 			// else insert only first key
 			else {
-				if (evicted_1_hash_first[0:0] == 0 ) {
-					ch_first_row_even.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1]);
-					ch_first_row_even.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
+				if (evicted_1_hash_first[8:8] == 0 ) {
+					ch_first_row_even.read(evicted_1_ch_first, 24w0 ++ evicted_1_hash_first[7:0]);
+					ch_first_row_even.write(24w0 ++ evicted_1_hash_first[7:0], stash_evicted_1);
 				} else {
-					ch_first_row_odd.read(evicted_1_ch_first, 1w0 ++ evicted_1_hash_first[31:1] );
-					ch_first_row_odd.write(1w0 ++ evicted_1_hash_first[31:1], stash_evicted_1);
+					ch_first_row_odd.read(evicted_1_ch_first, 24w0 ++ evicted_1_hash_first[7:0] );
+					ch_first_row_odd.write(24w0 ++ evicted_1_hash_first[7:0], stash_evicted_1);
 				}
 				// second key evicted from stash become the second key evicted from ch first, for code coherence
 				evicted_2_ch_first = stash_evicted_2;
@@ -319,35 +326,35 @@ control MyIngress(inout headers hdr,
 			// both keys extracted from first ch are != 0
 			if (evicted_1_ch_first[95:0] != 0 && evicted_2_ch_first[95:0] != 0) {
 				// need to try inserting both in second ch 
-				hash(evicted_1_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_1_ch_first[95:0]}, CH_LENGTH_BIT);
-				hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
+				hash(evicted_1_hash_second, HashAlgorithm.crc32, 32w0, { 24w0, evicted_1_ch_first[95:0]}, CH_LENGTH_BIT);
+				hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 24w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
 				// access to different halves -> both inserted 	
 				// if we can access two different locations ... 
-				if (evicted_1_hash_second[0:0] != evicted_2_hash_second[0:0]) {
+				if (evicted_1_hash_second[8:8] != evicted_2_hash_second[8:8]) {
 					// substitute values
-					if (evicted_1_hash_second[0:0] == 0) {
-						ch_second_row_even.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
-						ch_second_row_even.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
+					if (evicted_1_hash_second[8:8] == 0) {
+						ch_second_row_even.read(evicted_1_ch_second, 24w0 ++ evicted_1_hash_second[7:0]);
+						ch_second_row_even.write(24w0 ++ evicted_1_hash_second[7:0], evicted_1_ch_first);
 					} else {
-						ch_second_row_odd.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
-						ch_second_row_odd.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
+						ch_second_row_odd.read(evicted_1_ch_second, 24w0 ++ evicted_1_hash_second[7:0]);
+						ch_second_row_odd.write(24w0 ++ evicted_1_hash_second[7:0], evicted_1_ch_first);
 					}
-					if (evicted_2_hash_second[0:0] == 0) {
-						ch_second_row_even.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
-						ch_second_row_even.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
+					if (evicted_2_hash_second[8:8] == 0) {
+						ch_second_row_even.read(evicted_2_ch_second, 24w0 ++ evicted_2_hash_second[7:0]);
+						ch_second_row_even.write(24w0 ++ evicted_2_hash_second[7:0], evicted_2_ch_first);
 					} else {
-						ch_second_row_odd.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
-						ch_second_row_odd.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
+						ch_second_row_odd.read(evicted_2_ch_second, 24w0 ++ evicted_2_hash_second[7:0]);
+						ch_second_row_odd.write(24w0 ++ evicted_2_hash_second[7:0], evicted_2_ch_first);
 					}
 					// save the eviction into the stash	
 					ch_stash_counter.read(stash_counter_result, 0);
-					ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
-					ch_stash.write(29w0 ++ stash_counter_result + 1, evicted_2_ch_second);
 					// if read values are != 0, update stash counter
 					if ( evicted_1_ch_second[95:0] != 0 ) {
+						ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
 						stash_counter_result = stash_counter_result + 1;
 					}
 					if ( evicted_2_ch_second[95:0] != 0 ) {
+						ch_stash.write(29w0 ++ stash_counter_result, evicted_2_ch_second);
 						stash_counter_result = stash_counter_result + 1;
 					}
 					ch_stash_counter.write(0, stash_counter_result);
@@ -355,21 +362,21 @@ control MyIngress(inout headers hdr,
 				// else only access location for first key and save the other into the stash
 				else {
 					// insert only the first key
-					if (evicted_1_hash_second[0:0] == 0) {
-						ch_second_row_even.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
-						ch_second_row_even.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
+					if (evicted_1_hash_second[8:8] == 0) {
+						ch_second_row_even.read(evicted_1_ch_second, 24w0 ++ evicted_1_hash_second[7:0]);
+						ch_second_row_even.write(24w0 ++ evicted_1_hash_second[7:0], evicted_1_ch_first);
 					} else {
-						ch_second_row_odd.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
-						ch_second_row_odd.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
+						ch_second_row_odd.read(evicted_1_ch_second, 24w0 ++ evicted_1_hash_second[7:0]);
+						ch_second_row_odd.write(24w0 ++ evicted_1_hash_second[7:0], evicted_1_ch_first);
 					}
 					ch_stash_counter.read(stash_counter_result, 0);
-					ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
-					//save into the stash the second key read from first ch
-					ch_stash.write(29w0 ++ (stash_counter_result + 1), evicted_2_ch_first);
 					if ( evicted_1_ch_second[95:0] != 0 ) {
+						ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
 						stash_counter_result = stash_counter_result + 1;
 					}
+					//save into the stash the second key read from first ch
 					if ( evicted_2_ch_first[95:0] != 0 ) {
+						ch_stash.write(29w0 ++ stash_counter_result, evicted_2_ch_first);
 						stash_counter_result = stash_counter_result + 1;
 					}
 					ch_stash_counter.write(0, stash_counter_result);
@@ -378,36 +385,32 @@ control MyIngress(inout headers hdr,
 			// only first  evicted key from ch 1 is different from 0
 			else if (evicted_1_ch_first[95:0] != 0) {
 				// only check first value
-				hash(evicted_1_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_1_ch_first[95:0]}, CH_LENGTH_BIT);
-				if (evicted_1_hash_second[0:0] == 0) {
-					ch_second_row_even.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
-					ch_second_row_even.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
+				hash(evicted_1_hash_second, HashAlgorithm.crc32, 32w0, { 24w0, evicted_1_ch_first[95:0]}, CH_LENGTH_BIT);
+				if (evicted_1_hash_second[8:8] == 0) {
+					ch_second_row_even.read(evicted_1_ch_second, 24w0 ++ evicted_1_hash_second[7:0]);
+					ch_second_row_even.write(24w0 ++ evicted_1_hash_second[7:0], evicted_1_ch_first);
 				} else {
-					ch_second_row_odd.read(evicted_1_ch_second, 1w0 ++ evicted_1_hash_second[31:1]);
-					ch_second_row_odd.write(1w0 ++ evicted_1_hash_second[31:1], evicted_1_ch_first);
+					ch_second_row_odd.read(evicted_1_ch_second, 24w0 ++ evicted_1_hash_second[7:0]);
+					ch_second_row_odd.write(24w0 ++ evicted_1_hash_second[7:0], evicted_1_ch_first);
 				}
 				ch_stash_counter.read(stash_counter_result, 0);
-				ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
-				//writing 0 into the stash
-				ch_stash.write(29w0 ++ (stash_counter_result + 1), evicted_2_ch_first);
 				if ( evicted_1_ch_second[95:0] != 0 ) {
+					ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_second);
 					stash_counter_result = stash_counter_result + 1;
 				}
 				ch_stash_counter.write(0, stash_counter_result);
 			} else if (evicted_2_ch_first[95:0] != 0) {
-				hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
-				if (evicted_2_hash_second[0:0] == 0) {
-					ch_second_row_even.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
-					ch_second_row_even.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
+				hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 24w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
+				if (evicted_2_hash_second[8:8] == 0) {
+					ch_second_row_even.read(evicted_2_ch_second, 24w0 ++ evicted_2_hash_second[7:0]);
+					ch_second_row_even.write(24w0 ++ evicted_2_hash_second[7:0], evicted_2_ch_first);
 				} else {
-					ch_second_row_odd.read(evicted_2_ch_second, 1w0 ++ evicted_2_hash_second[31:1]);
-					ch_second_row_odd.write(1w0 ++ evicted_2_hash_second[31:1], evicted_2_ch_first);
+					ch_second_row_odd.read(evicted_2_ch_second, 24w0 ++ evicted_2_hash_second[7:0]);
+					ch_second_row_odd.write(24w0 ++ evicted_2_hash_second[7:0], evicted_2_ch_first);
 				}
 				ch_stash_counter.read(stash_counter_result, 0);
-				//writing 0 into the stash
-				ch_stash.write(29w0 ++ stash_counter_result, evicted_1_ch_first);
-				ch_stash.write(29w0 ++ (stash_counter_result + 1), evicted_2_ch_second);
 				if ( evicted_2_ch_second[95:0] != 0 ) {
+					ch_stash.write(29w0 ++ stash_counter_result, evicted_2_ch_second);
 					stash_counter_result = stash_counter_result + 1;
 				}
 				ch_stash_counter.write(0, stash_counter_result);
@@ -416,10 +419,32 @@ control MyIngress(inout headers hdr,
 			}
 			// recirculate trying to free the stash
 			ch_stash_counter.read(stash_counter_result, 0);
-			// recirculate only if 2 or more keys are into the stash
-			if (stash_counter_result > 1) {
+			if (stash_counter_result == 4) {
+				//mix stash
+				bit<106> temp_stash_0;
+				bit<106> temp_1;
+
+				ch_stash.read(temp_stash_0, 0);	
+
+				ch_stash.read(temp_1, 1);	
+				ch_stash.write(0, temp_1);	
+
+				ch_stash.read(temp_1, 2);	
+				ch_stash.write(1, temp_1);	
+
+				ch_stash.read(temp_1, 3);	
+				ch_stash.write(2, temp_1);	
+	
+				ch_stash.write(3, temp_stash_0);
+
 				resubmit_preserving_field_list(1);
 			}
+			bit<106> debug_value;
+			bit<106> debug_1_value;
+			ch_stash.read(debug_value, 29w0 ++ (stash_counter_result - 1));
+			ch_stash.read(debug_1_value, 29w0 ++ (stash_counter_result - 2));
+			debug.write(0, debug_value[31:0]);
+			debug_1.write(0, debug_1_value[31:0]);
 		} 
 	}
 }

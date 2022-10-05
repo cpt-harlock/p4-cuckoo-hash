@@ -27,6 +27,10 @@ delete_interface:
 	-sudo ip link del veth0.0 
 	-sudo ip link del veth1.0
 
+debug:
+	echo register_read  debug | sudo simple_switch_CLI --thrift-port 9091
+debug_1:
+	echo register_read  debug_1 | sudo simple_switch_CLI --thrift-port 9091
 inserted_keys:
 	echo register_read  inserted_keys | sudo simple_switch_CLI --thrift-port 9091
 last_key:
@@ -35,6 +39,8 @@ recirculation:
 	echo register_read  recirculation_counter  | sudo simple_switch_CLI --thrift-port 9091
 hit:
 	echo register_read  hit_counter  | sudo simple_switch_CLI --thrift-port 9091
+discarded:
+	echo register_read  discarded_keys | sudo simple_switch_CLI --thrift-port 9091
 cuckoo_first:
 	echo register_read  ch_first_row | sudo simple_switch_CLI --thrift-port 9091
 cuckoo_second:
