@@ -23,6 +23,7 @@
 #define STASH_INSERT_ODD(input, increment) { \
 	bit<2> stash_counter_read_value; \
 	bit<32> discarded_read_value; \
+	bit<32> kicked_read_value; \
 	bit<32> inserted_keys_read_value; \
 	ch_stash_counter_odd.read(stash_counter_read_value, 0); \
 	inserted_keys.read(inserted_keys_read_value, 0); \
@@ -34,8 +35,14 @@
 		} \
 	} \
 	else if (stash_counter_read_value >=2 && input[95:0] != 96w0) { \
-		discarded_keys.read(discarded_read_value, 0); \
-		discarded_keys.write(0, discarded_read_value + 1); \
+		if (increment  == 1) { \
+			discarded_keys.read(discarded_read_value, 0); \
+			discarded_keys.write(0, discarded_read_value + 1); \
+		} \
+		else { \
+			kicked_keys.read(kicked_read_value, 0); \
+			kicked_keys.write(0, kicked_read_value + 1); \
+		} \
 	} \
 	ch_stash_counter_odd.write(0, stash_counter_read_value); \
 }
@@ -43,6 +50,7 @@
 #define STASH_INSERT_EVEN(input, increment) { \
 	bit<2> stash_counter_read_value; \
 	bit<32> discarded_read_value; \
+	bit<32> kicked_read_value; \
 	bit<32> inserted_keys_read_value; \
 	ch_stash_counter_even.read(stash_counter_read_value, 0); \
 	inserted_keys.read(inserted_keys_read_value, 0); \
@@ -54,8 +62,14 @@
 		} \
 	} \
 	else if (stash_counter_read_value >=2 && input[95:0] != 96w0) { \
-		discarded_keys.read(discarded_read_value, 0); \
-		discarded_keys.write(0, discarded_read_value + 1); \
+		if (increment  == 1) { \
+			discarded_keys.read(discarded_read_value, 0); \
+			discarded_keys.write(0, discarded_read_value + 1); \
+		} \
+		else { \
+			kicked_keys.read(kicked_read_value, 0); \
+			kicked_keys.write(0, kicked_read_value + 1); \
+		} \
 	} \
 	ch_stash_counter_even.write(0, stash_counter_read_value); \
 }
@@ -157,7 +171,7 @@ typedef bit<32> ip4Addr_t;
 #define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
 #define PKT_INSTANCE_TYPE_REPLICATION 5
 #define PKT_INSTANCE_TYPE_RESUBMIT 6
-#define LOOP_LIMIT 200
+#define LOOP_LIMIT 2000
 
 
 #define CH_LENGTH 512
@@ -177,6 +191,7 @@ register<bit<96>>(1) last_key;
 register<bit<32>>(1) recirculation_counter;
 register<bit<32>>(1) inserted_keys;
 register<bit<32>>(1) discarded_keys;
+register<bit<32>>(1) kicked_keys;
 register<bit<32>>(1) debug;
 register<bit<32>>(1) debug_1;
 register<bit<32>>(1) debug_2;
