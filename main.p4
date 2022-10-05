@@ -20,75 +20,127 @@
 	} \
 }
 
-#define STASH_INSERT(input_1, input_2) { \
-	bit<3> stash_counter_read_value; \
-	ch_stash_counter.read(stash_counter_read_value, 0); \
-	if (stash_counter_read_value < 4 && input_1[95:0] != 96w0) { \
-		ch_stash.write(29w0 ++ stash_counter_read_value, input_1); \
+#define STASH_INSERT_ODD(input, increment) { \
+	bit<2> stash_counter_read_value; \
+	bit<32> discarded_read_value; \
+	bit<32> inserted_keys_read_value; \
+	ch_stash_counter_odd.read(stash_counter_read_value, 0); \
+	inserted_keys.read(inserted_keys_read_value, 0); \
+	if (stash_counter_read_value < 2 && input[95:0] != 96w0) { \
+		ch_stash_odd.write(30w0 ++ stash_counter_read_value, input); \
 		stash_counter_read_value = stash_counter_read_value + 1; \
+		if (increment == 1) { \
+			inserted_keys.write(0, inserted_keys_read_value + 1); \
+		} \
 	} \
-	if (stash_counter_read_value < 4 && input_2[95:0] != 96w0) { \
-		ch_stash.write(29w0 ++ stash_counter_read_value, input_2); \
+	else if (stash_counter_read_value >=2 && input[95:0] != 96w0) { \
+		discarded_keys.read(discarded_read_value, 0); \
+		discarded_keys.write(0, discarded_read_value + 1); \
+	} \
+	ch_stash_counter_odd.write(0, stash_counter_read_value); \
+}
+
+#define STASH_INSERT_EVEN(input, increment) { \
+	bit<2> stash_counter_read_value; \
+	bit<32> discarded_read_value; \
+	bit<32> inserted_keys_read_value; \
+	ch_stash_counter_even.read(stash_counter_read_value, 0); \
+	inserted_keys.read(inserted_keys_read_value, 0); \
+	if (stash_counter_read_value < 2 && input[95:0] != 96w0) { \
+		ch_stash_even.write(30w0 ++ stash_counter_read_value, input); \
 		stash_counter_read_value = stash_counter_read_value + 1; \
+		if (increment == 1) { \
+			inserted_keys.write(0, inserted_keys_read_value + 1); \
+		} \
 	} \
-	ch_stash_counter.write(0, stash_counter_read_value); \
-}
-#define STASH_MIX_3 { \
-	bit<106> temp_stash_0; \
-	bit<106> temp_1; \
-	ch_stash.read(temp_stash_0, 0);	 \
-	ch_stash.read(temp_1, 1);	 \
-	ch_stash.write(0, temp_1);	 \
-	ch_stash.read(temp_1, 2);	 \
-	ch_stash.write(1, temp_1);	 \
-	ch_stash.write(2, temp_stash_0);	 \
-}
-	
-#define STASH_MIX_4 { \
-	bit<106> temp_stash_0; \
-	bit<106> temp_1; \
-	ch_stash.read(temp_stash_0, 0);	 \
-	ch_stash.read(temp_1, 1);	 \
-	ch_stash.write(0, temp_1);	 \
-	ch_stash.read(temp_1, 2);	 \
-	ch_stash.write(1, temp_1);	 \
-	ch_stash.read(temp_1, 3);	 \
-	ch_stash.write(2, temp_1);	 \
-	ch_stash.write(3, temp_stash_0);	 \
-}
-#define STASH_MIX { \
-	bit<3> stash_counter_read_value; \
-	ch_stash_counter.read(stash_counter_read_value, 0); \
-	if (stash_counter_read_value == 3) { \
-		STASH_MIX_3 \
+	else if (stash_counter_read_value >=2 && input[95:0] != 96w0) { \
+		discarded_keys.read(discarded_read_value, 0); \
+		discarded_keys.write(0, discarded_read_value + 1); \
 	} \
-	if (stash_counter_read_value == 4) { \
-		STASH_MIX_4 \
+	ch_stash_counter_even.write(0, stash_counter_read_value); \
+}
+
+#define STASH_INSERT(input_1, input_2, increment) { \
+	bit<32> hash_1; \
+	bit<32> hash_2; \
+	hash(hash_1, HashAlgorithm.crc32, 32w0, { 0w0, (input_1)[95:0]}, 32w512); \
+	hash(hash_2, HashAlgorithm.crc32, 32w0, { 0w0, (input_2)[95:0]}, 32w512); \
+	if (hash_1[8:8] == 1w0) { \
+		STASH_INSERT_EVEN((input_1), increment) \
+	} else { \
+		STASH_INSERT_ODD((input_1), increment) \
+	} \
+	if (hash_2[8:8] == 1w0) { \
+		STASH_INSERT_EVEN((input_2), increment) \
+	} else { \
+		STASH_INSERT_ODD((input_2), increment) \
 	} \
 }
 
+
+//TODO
+//#define STASH_MIX_3 { \
+//	bit<106> temp_stash_0; \
+//	bit<106> temp_1; \
+//	ch_stash.read(temp_stash_0, 0);	 \
+//	ch_stash.read(temp_1, 1);	 \
+//	ch_stash.write(0, temp_1);	 \
+//	ch_stash.read(temp_1, 2);	 \
+//	ch_stash.write(1, temp_1);	 \
+//	ch_stash.write(2, temp_stash_0);	 \
+//}
+//TODO	
+//#define STASH_MIX_4 { \
+//	bit<106> temp_stash_0; \
+//	bit<106> temp_1; \
+//	ch_stash.read(temp_stash_0, 0);	 \
+//	ch_stash.read(temp_1, 1);	 \
+//	ch_stash.write(0, temp_1);	 \
+//	ch_stash.read(temp_1, 2);	 \
+//	ch_stash.write(1, temp_1);	 \
+//	ch_stash.read(temp_1, 3);	 \
+//	ch_stash.write(2, temp_1);	 \
+//	ch_stash.write(3, temp_stash_0);	 \
+//}
+//#define STASH_MIX { \
+//	bit<3> stash_counter_read_value; \
+//	ch_stash_counter.read(stash_counter_read_value, 0); \
+//	if (stash_counter_read_value == 3) { \
+//		STASH_MIX_3 \
+//	} \
+//	if (stash_counter_read_value == 4) { \
+//		STASH_MIX_4 \
+//	} \
+//}
+
 // zeroing input variables 
 #define STASH_READ(output_1, output_2) { \
-	bit<3> stash_counter_read_value; \
+	bit<2> odd_stash_counter_read_value; \
+	bit<2> even_stash_counter_read_value; \
 	output_1 = 0; \
 	output_2 = 0; \
-	ch_stash_counter.read(stash_counter_read_value, 0); \
-	if (stash_counter_read_value == 3) { \
-		ch_stash.read(output_2, 2); \
-		ch_stash.read(output_1, 1); \
-		ch_stash.write(2, 0); \
-		ch_stash.write(1, 0); \
-		ch_stash_counter.write(0, 1); \
-	} \
-	else if (stash_counter_read_value == 4) { \
-		ch_stash.read(output_2, 3); \
-		ch_stash.read(output_1, 2); \
-		ch_stash.write(3, 0); \
-		ch_stash.write(2, 0); \
-		ch_stash_counter.write(0, 2); \
+	ch_stash_counter_odd.read(odd_stash_counter_read_value, 0); \
+	ch_stash_counter_even.read(even_stash_counter_read_value, 0); \
+	if (odd_stash_counter_read_value > 0 && even_stash_counter_read_value > 0) { \
+		ch_stash_odd.read(output_1, 30w0 ++ (odd_stash_counter_read_value - 1)); \
+		ch_stash_even.read(output_2, 30w0 ++ (even_stash_counter_read_value - 1)); \
+		ch_stash_odd.write(30w0 ++ (odd_stash_counter_read_value - 1), 0); \
+		ch_stash_even.write(30w0 ++ (even_stash_counter_read_value - 1), 0); \
+		ch_stash_counter_odd.write(0, odd_stash_counter_read_value - 1); \
+		ch_stash_counter_even.write(0, even_stash_counter_read_value - 1); \
 	} \
 	else { \
 		return; \
+	} \
+}
+
+#define STASH_RECIRCULATE { \
+	bit<2> odd_stash_counter_read_value; \
+	bit<2> even_stash_counter_read_value; \
+	ch_stash_counter_odd.read(odd_stash_counter_read_value, 0); \
+	ch_stash_counter_even.read(even_stash_counter_read_value, 0); \
+	if (odd_stash_counter_read_value > 0 && even_stash_counter_read_value > 0 ) { \
+			resubmit_preserving_field_list(1); \
 	} \
 }
 	
@@ -115,8 +167,10 @@ register<bit<106>>(CH_LENGTH/2) ch_first_row_odd;
 register<bit<106>>(CH_LENGTH/2) ch_first_row_even;
 register<bit<106>>(CH_LENGTH/2) ch_second_row_odd;
 register<bit<106>>(CH_LENGTH/2) ch_second_row_even;
-register<bit<106>>(4) ch_stash;
-register<bit<3>>(1) ch_stash_counter;
+register<bit<106>>(2) ch_stash_odd;
+register<bit<106>>(2) ch_stash_even;
+register<bit<2>>(1) ch_stash_counter_odd;
+register<bit<2>>(1) ch_stash_counter_even;
 register<bit<10>>(1) counter_reg;
 register<bit<32>>(1) hit_counter;
 register<bit<96>>(1) last_key;
@@ -240,7 +294,8 @@ control MyIngress(inout headers hdr,
 		bit<32> second_index;
 		bit<96> packet_key;
 		bit<10> counter_result;
-		bit<3> stash_counter_result;
+		bit<2> odd_stash_counter_result;
+		bit<2> even_stash_counter_result;
 		bit<106> first_result;
 		bit<106> second_result;
 		bit<106> stash_result_0;
@@ -253,7 +308,8 @@ control MyIngress(inout headers hdr,
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
 
-		ch_stash_counter.read(stash_counter_result, 0);
+		ch_stash_counter_odd.read(odd_stash_counter_result, 0);
+		ch_stash_counter_even.read(even_stash_counter_result, 0);
 
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
@@ -291,10 +347,10 @@ control MyIngress(inout headers hdr,
 			else {
 				ch_second_row_odd.read(second_result, 24w0 ++ second_index[7:0]);
 			}
-			ch_stash.read(stash_result_0, 0);
-			ch_stash.read(stash_result_1, 1);
-			ch_stash.read(stash_result_2, 2);
-			ch_stash.read(stash_result_3, 3);
+			ch_stash_odd.read(stash_result_0, 0);
+			ch_stash_odd.read(stash_result_1, 1);
+			ch_stash_even.read(stash_result_2, 0);
+			ch_stash_even.read(stash_result_3, 1);
 			hit_counter.read(hit_counter_read, 0);
 			if (first_result[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
@@ -325,14 +381,9 @@ control MyIngress(inout headers hdr,
 				}	
 				inserted_keys.write(0, inserted_keys_read+1);
 			} 
-			else if (stash_counter_result < 4) {
-				// stash treated as a stack
-				ch_stash.write(29w0 ++ stash_counter_result, 10w0 ++ packet_key);
-				ch_stash_counter.write(0, stash_counter_result + 1);
-				inserted_keys.write(0, inserted_keys_read+1);
-				if (stash_counter_result + 1 >=  3) {
-					resubmit_preserving_field_list(1);
-				}
+			else if (odd_stash_counter_result < 2 || even_stash_counter_result < 2) {
+				STASH_INSERT(10w0 ++ packet_key, 106w0, 1)
+				STASH_RECIRCULATE
 			} 
 			else {
 				bit<32> discarded_keys_read;
@@ -374,6 +425,7 @@ control MyIngress(inout headers hdr,
 			hash(evicted_2_hash_first, HashAlgorithm.crc32, 32w0, { 0w0, stash_evicted_2[95:0]}, CH_LENGTH_BIT);
 
 			//access two different memories
+			// I AM SURE I FALL IN THIS CASE
 			if (evicted_1_hash_first[8:8] != evicted_2_hash_first[8:8] ) {
 				//insert stash elements into ch 1 and evict corresponding values
 				INSERT_FIRST_CUCKOO(stash_evicted_1, evicted_1_hash_first, evicted_1_ch_first)
@@ -426,20 +478,17 @@ control MyIngress(inout headers hdr,
 			}
 			//insert into stash
 			
-			STASH_INSERT(evicted_1_ch_second, evicted_2_ch_second);
-			STASH_MIX
+			STASH_INSERT(evicted_1_ch_second, evicted_2_ch_second, 0)
+			//STASH_MIX
 			// recirculate trying to free the stash
-			ch_stash_counter.read(stash_counter_result, 0);
-			if (stash_counter_result == 4) {
-					resubmit_preserving_field_list(1);
-			}
+			STASH_RECIRCULATE
 				
-			bit<106> debug_value;
-			bit<106> debug_1_value;
-			ch_stash.read(debug_value, 29w0 ++ (stash_counter_result - 1));
-			ch_stash.read(debug_1_value, 29w0 ++ (stash_counter_result - 2));
-			debug.write(0, debug_value[31:0]);
-			debug_1.write(0, debug_1_value[31:0]);
+			//bit<106> debug_value;
+			//bit<106> debug_1_value;
+			//ch_stash.read(debug_value, 29w0 ++ (stash_counter_result - 1));
+			//ch_stash.read(debug_1_value, 29w0 ++ (stash_counter_result - 2));
+			//debug.write(0, debug_value[31:0]);
+			//debug_1.write(0, debug_1_value[31:0]);
 		} 
 	}
 }
