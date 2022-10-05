@@ -31,6 +31,8 @@ debug:
 	echo register_read  debug | sudo simple_switch_CLI --thrift-port 9091
 debug_1:
 	echo register_read  debug_1 | sudo simple_switch_CLI --thrift-port 9091
+debug_2:
+	echo register_read  debug_2 | sudo simple_switch_CLI --thrift-port 9091
 inserted_keys:
 	echo register_read  inserted_keys | sudo simple_switch_CLI --thrift-port 9091
 last_key:
