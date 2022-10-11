@@ -105,7 +105,7 @@ typedef bit<32> ip4Addr_t;
 #define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
 #define PKT_INSTANCE_TYPE_REPLICATION 5
 #define PKT_INSTANCE_TYPE_RESUBMIT 6
-#define LOOP_LIMIT 2000
+#define LOOP_LIMIT 50
 
 
 #define CH_LENGTH 512
@@ -126,6 +126,7 @@ register<bit<32>>(1) discarded_keys;
 register<bit<32>>(1) debug;
 register<bit<32>>(1) debug_1;
 register<bit<32>>(1) debug_2;
+register<bit<32>>(1) total_packets;
 
 header ethernet_t {
 	macAddr_t dstAddr;
@@ -252,9 +253,12 @@ control MyIngress(inout headers hdr,
 		bit<106> stash_evicted_2;
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
+		bit<32> total_packets_read;
+
+		total_packets.read(total_packets_read, 0);
+		total_packets.write(0, total_packets_read + 1);
 
 		ch_stash_counter.read(stash_counter_result, 0);
-
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
 			//return should work as well
