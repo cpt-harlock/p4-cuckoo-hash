@@ -263,8 +263,9 @@ control MyIngress(inout headers hdr,
 
 			//insert into stash
 			INSERT_INTO_STASH(ch_second_level_first_table_read, ch_first_stash, ch_first_stash_counter, 0);
-			//
-			STASH_RECIRCULATE
+
+			STASH_MIX(ch_first_stash, ch_first_stash_counter);
+			STASH_RECIRCULATE;
 				
 			//bit<106> debug_value;
 			//bit<106> debug_1_value;
