@@ -1,5 +1,6 @@
 #include <v1model.p4>
 #include <core.p4>
+#include <header.p4>
 
 typedef bit<9>  egressSpec_t;
 typedef bit<48> macAddr_t;
@@ -15,101 +16,61 @@ typedef bit<32> ip4Addr_t;
 #define PKT_INSTANCE_TYPE_RESUBMIT 6
 #define LOOP_LIMIT 50
 
+// four path of 64  
+#define CH_LENGTH 64
+#define CH_LENGTH_BIT 32w64
 
-#define CH_LENGTH 512
-#define CH_LENGTH_BIT 32w512
-// macro for 512 total locations
-#define INSERT_FIRST_CUCKOO(input, index, output) { \
-	if (index[8:8] == 0 ) { \
-		ch_first_row_even.read(output, 24w0 ++ index[7:0]); \
-		ch_first_row_even.write(24w0 ++ index[7:0], input); \
-	} else { \
-		ch_first_row_odd.read(output, 24w0 ++ index[7:0]); \
-		ch_first_row_odd.write(24w0 ++ index[7:0], input); \
-	} \
-}
-#define INSERT_SECOND_CUCKOO(input, index, output) { \
-	bit<32> temp_hash; \
-	hash(temp_hash, HashAlgorithm.crc32, 32w0, { 0w0, input[95:0]}, CH_LENGTH_BIT); \
-	if (temp_hash[8:8] == 0 ) { \
-		ch_second_row_even.read(output, 24w0 ++ index[7:0]); \
-		ch_second_row_even.write(24w0 ++ index[7:0], input); \
-	} else { \
-		ch_second_row_odd.read(output, 24w0 ++ index[7:0]); \
-		ch_second_row_odd.write(24w0 ++ index[7:0], input); \
-	} \
-}
+// 106 bits per register, first 96 bits for key and others for value 
+// two levels of ch, 4 tables per level (4 parallel datapaths)
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_first_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_second_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_third_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_fourth_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_first_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_second_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_third_table;
+register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_fourth_table;
+register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_first_stash;
+register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_second_stash;
+register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_thid_stash;
+register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_fourth_stash;
+register<bit<32>>(1) ch_first_stash_counter;
+register<bit<32>>(1) ch_second_stash_counter;
+register<bit<32>>(1) ch_third_stash_counter;
+register<bit<32>>(1) ch_fourth_stash_counter;
 
-#define STASH_INSERT_ODD(input, increment) { \
-	bit<2> stash_counter_read_value; \
-	bit<32> discarded_read_value; \
-	bit<32> kicked_read_value; \
-	bit<32> inserted_keys_read_value; \
-	ch_stash_counter_odd.read(stash_counter_read_value, 0); \
-	inserted_keys.read(inserted_keys_read_value, 0); \
-	if (stash_counter_read_value < 2 && input[95:0] != 96w0) { \
-		ch_stash_odd.write(30w0 ++ stash_counter_read_value, input); \
-		stash_counter_read_value = stash_counter_read_value + 1; \
-		if (increment == 1) { \
-			inserted_keys.write(0, inserted_keys_read_value + 1); \
-		} \
-	} \
-	else if (stash_counter_read_value >=2 && input[95:0] != 96w0) { \
-		if (increment  == 1) { \
-			discarded_keys.read(discarded_read_value, 0); \
-			discarded_keys.write(0, discarded_read_value + 1); \
-		} \
-		else { \
-			kicked_keys.read(kicked_read_value, 0); \
-			kicked_keys.write(0, kicked_read_value + 1); \
-		} \
-	} \
-	ch_stash_counter_odd.write(0, stash_counter_read_value); \
-}
+register<bit<32>>(1) hit_counter;
+register<bit<96>>(1) last_key;
+register<bit<32>>(1) recirculation_counter;
+register<bit<32>>(1) inserted_keys;
+register<bit<32>>(1) discarded_keys;
+register<bit<32>>(1) kicked_keys;
+register<bit<32>>(1) debug;
+register<bit<32>>(1) debug_1;
+register<bit<32>>(1) debug_2;
 
-#define STASH_INSERT_EVEN(input, increment) { \
-	bit<2> stash_counter_read_value; \
-	bit<32> discarded_read_value; \
-	bit<32> kicked_read_value; \
-	bit<32> inserted_keys_read_value; \
-	ch_stash_counter_even.read(stash_counter_read_value, 0); \
-	inserted_keys.read(inserted_keys_read_value, 0); \
-	if (stash_counter_read_value < 2 && input[95:0] != 96w0) { \
-		ch_stash_even.write(30w0 ++ stash_counter_read_value, input); \
-		stash_counter_read_value = stash_counter_read_value + 1; \
-		if (increment == 1) { \
-			inserted_keys.write(0, inserted_keys_read_value + 1); \
-		} \
-	} \
-	else if (stash_counter_read_value >=2 && input[95:0] != 96w0) { \
-		if (increment  == 1) { \
-			discarded_keys.read(discarded_read_value, 0); \
-			discarded_keys.write(0, discarded_read_value + 1); \
-		} \
-		else { \
-			kicked_keys.read(kicked_read_value, 0); \
-			kicked_keys.write(0, kicked_read_value + 1); \
-		} \
-	} \
-	ch_stash_counter_even.write(0, stash_counter_read_value); \
-}
-
-#define STASH_INSERT(input_1, input_2, increment) { \
-	bit<32> hash_1; \
-	bit<32> hash_2; \
-	hash(hash_1, HashAlgorithm.crc32, 32w0, { 0w0, (input_1)[95:0]}, 32w512); \
-	hash(hash_2, HashAlgorithm.crc32, 32w0, { 0w0, (input_2)[95:0]}, 32w512); \
-	if (hash_1[8:8] == 1w0) { \
-		STASH_INSERT_EVEN((input_1), increment) \
-	} else { \
-		STASH_INSERT_ODD((input_1), increment) \
-	} \
-	if (hash_2[8:8] == 1w0) { \
-		STASH_INSERT_EVEN((input_2), increment) \
-	} else { \
-		STASH_INSERT_ODD((input_2), increment) \
-	} \
-}
+//#define INSERT_FIRST_CUCKOO(input, index, output) { \
+//	if (index[8:8] == 0 ) { \
+//		INSERT_INTO_CUCKOO(input, 1w0, ch_first_row_
+//		ch_first_row_even.read(output, 24w0 ++ index[7:0]); \
+//		ch_first_row_even.write(24w0 ++ index[7:0], input); \
+//	} else { \
+//		ch_first_row_odd.read(output, 24w0 ++ index[7:0]); \
+//		ch_first_row_odd.write(24w0 ++ index[7:0], input); \
+//	} \
+//}
+//
+//#define INSERT_SECOND_CUCKOO(input, index, output) { \
+//	bit<32> temp_hash; \
+//	hash(temp_hash, HashAlgorithm.crc32, 32w0, { 0w0, input[95:0]}, CH_LENGTH_BIT); \
+//	if (temp_hash[8:8] == 0 ) { \
+//		ch_second_row_even.read(output, 24w0 ++ index[7:0]); \
+//		ch_second_row_even.write(24w0 ++ index[7:0], input); \
+//	} else { \
+//		ch_second_row_odd.read(output, 24w0 ++ index[7:0]); \
+//		ch_second_row_odd.write(24w0 ++ index[7:0], input); \
+//	} \
+//}
 
 
 //TODO
@@ -148,25 +109,6 @@ typedef bit<32> ip4Addr_t;
 //}
 
 // zeroing input variables 
-#define STASH_READ(output_1, output_2) { \
-	bit<2> odd_stash_counter_read_value; \
-	bit<2> even_stash_counter_read_value; \
-	output_1 = 0; \
-	output_2 = 0; \
-	ch_stash_counter_odd.read(odd_stash_counter_read_value, 0); \
-	ch_stash_counter_even.read(even_stash_counter_read_value, 0); \
-	if (odd_stash_counter_read_value > 0 && even_stash_counter_read_value > 0) { \
-		ch_stash_odd.read(output_1, 30w0 ++ (odd_stash_counter_read_value - 1)); \
-		ch_stash_even.read(output_2, 30w0 ++ (even_stash_counter_read_value - 1)); \
-		ch_stash_odd.write(30w0 ++ (odd_stash_counter_read_value - 1), 0); \
-		ch_stash_even.write(30w0 ++ (even_stash_counter_read_value - 1), 0); \
-		ch_stash_counter_odd.write(0, odd_stash_counter_read_value - 1); \
-		ch_stash_counter_even.write(0, even_stash_counter_read_value - 1); \
-	} \
-	else { \
-		return; \
-	} \
-}
 
 #define STASH_RECIRCULATE { \
 	bit<2> odd_stash_counter_read_value; \
@@ -179,25 +121,6 @@ typedef bit<32> ip4Addr_t;
 }
 	
 
-// 106 bits per register, first 96 bits for key and others for value 
-register<bit<106>>(CH_LENGTH/2) ch_first_row_odd;
-register<bit<106>>(CH_LENGTH/2) ch_first_row_even;
-register<bit<106>>(CH_LENGTH/2) ch_second_row_odd;
-register<bit<106>>(CH_LENGTH/2) ch_second_row_even;
-register<bit<106>>(2) ch_stash_odd;
-register<bit<106>>(2) ch_stash_even;
-register<bit<2>>(1) ch_stash_counter_odd;
-register<bit<2>>(1) ch_stash_counter_even;
-register<bit<10>>(1) counter_reg;
-register<bit<32>>(1) hit_counter;
-register<bit<96>>(1) last_key;
-register<bit<32>>(1) recirculation_counter;
-register<bit<32>>(1) inserted_keys;
-register<bit<32>>(1) discarded_keys;
-register<bit<32>>(1) kicked_keys;
-register<bit<32>>(1) debug;
-register<bit<32>>(1) debug_1;
-register<bit<32>>(1) debug_2;
 
 header ethernet_t {
 	macAddr_t dstAddr;
@@ -324,31 +247,23 @@ control MyIngress(inout headers hdr,
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
 
-		ch_stash_counter_odd.read(odd_stash_counter_result, 0);
-		ch_stash_counter_even.read(even_stash_counter_result, 0);
 
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
 			//return should work as well
 			exit;
 		}
+
+
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
-			//packet_key = hdr.ipv4.srcAddr ++ hdr.ipv4.dstAddr ++ hdr.tcp.srcPort ++ hdr.tcp.dstPort;
-			//HACK
+			inserted_keys.read(inserted_keys_read, 0);
 			packet_key = 64w0 ++ hdr.ipv4.srcAddr;
+			last_key.write(0, packet_key) ;
 			counter_reg.read(counter_result, 0);
 			counter_reg.write(0, counter_result+1);
-		} else {
-			packet_key = meta.keyvalue[95:0];
-			counter_result = meta.keyvalue[105:96];
-		}
-
-		last_key.write(0, packet_key) ;
-		inserted_keys.read(inserted_keys_read, 0);
-
-		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
-			hash(first_index, HashAlgorithm.crc32, 32w0, { 0w0, packet_key }, CH_LENGTH_BIT);
-			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, CH_LENGTH_BIT);
+			READ_FROM_CUCKOO(1w0, ch_first_level_first_tabe
+			hash(first_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, CH_LENGTH_BIT);
+			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w1, packet_key }, CH_LENGTH_BIT);
 			//debug.write(0, first_index);
 
 			if (first_index[8:8]==0) {
