@@ -1,11 +1,17 @@
 from scapy.all import *
 import os
+import sys
 
-capture = input("Enter file path of pcap file: " )
+#capture = input("Enter file path of pcap file: " )
+
+capture = sys.argv[1]  
 pcap = rdpcap(capture)
 
 s = set()
-os.remove('filtered.pcap')
+try:
+    os.remove('filtered.pcap')
+except :
+    print("no file to remove")
 
 def write(pkt):
     wrpcap('filtered.pcap', pkt, append=True, linktype=101 )  #appends packet to output file

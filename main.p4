@@ -17,8 +17,8 @@ typedef bit<32> ip4Addr_t;
 #define LOOP_LIMIT 50
 
 // four path of 64  
-#define CH_LENGTH 64
-#define CH_LENGTH_BIT 32w64
+#define CH_LENGTH 128
+#define CH_LENGTH_BIT 32w128
 
 // 106 bits per register, first 96 bits for key and others for value 
 // two levels of ch, 4 tables per level (4 parallel datapaths)
