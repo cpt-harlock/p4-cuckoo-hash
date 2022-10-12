@@ -348,7 +348,13 @@ control MyIngress(inout headers hdr,
 			INSERT_INTO_STASH(ch_second_level_second_table_read, ch_second_stash, ch_second_stash_counter, 0);
 			INSERT_INTO_STASH(ch_second_level_third_table_read, ch_third_stash, ch_third_stash_counter, 0);
 			INSERT_INTO_STASH(ch_second_level_fourth_table_read, ch_fourth_stash, ch_fourth_stash_counter, 0);
-			STASH_RECIRCULATE
+
+
+			STASH_MIX(ch_first_stash, ch_first_stash_counter);
+			STASH_MIX(ch_second_stash, ch_second_stash_counter);
+			STASH_MIX(ch_third_stash, ch_third_stash_counter);
+			STASH_MIX(ch_fourth_stash, ch_fourth_stash_counter);
+			STASH_RECIRCULATE;
 				
 			//bit<106> debug_value;
 			//bit<106> debug_1_value;
