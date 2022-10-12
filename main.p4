@@ -47,8 +47,8 @@ register<bit<32>>(1) counter_reg;
 	bit<32> ch_second_stash_counter_read;\
 	ch_first_stash_counter.read(ch_first_stash_counter_read, 0);\
 	ch_second_stash_counter.read(ch_second_stash_counter_read, 0);\
-	bool bool1 = ch_first_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
-	bool bool2 = ch_second_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
+	bool bool1 = ch_first_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR; \ 
+	bool bool2 = ch_second_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR; \ 
 	if (bool1 && bool2) {\
 		resubmit_preserving_field_list(1);\
 	}\
@@ -167,18 +167,6 @@ control MyIngress(inout headers hdr,
 		bit<32> datapath_selection_index;
 		bit<96> packet_key;
 		bit<32> counter_result;
-		bit<2> odd_stash_counter_result;
-		bit<2> even_stash_counter_result;
-		bit<106> first_result;
-		bit<106> second_result;
-		bit<106> stash_first_result;
-		bit<106> stash_second_result;
-		bit<106> stash_third_result;
-		bit<106> stash_fourth_result;
-		bit<106> stash_fifth_result;
-		bit<106> stash_sixth_result;
-		bit<106> stash_seventh_result;
-		bit<106> stash_eighth_result;
 		bit<106> temp;
 		bit<106> stash_evicted_1;
 		bit<106> stash_evicted_2;
@@ -192,6 +180,16 @@ control MyIngress(inout headers hdr,
 		} 
 
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
+			bit<KEY_VALUE_SIZE> first_result;
+			bit<KEY_VALUE_SIZE> second_result;
+			bit<KEY_VALUE_SIZE> stash_first_result;
+			bit<KEY_VALUE_SIZE> stash_second_result;
+			bit<KEY_VALUE_SIZE> stash_third_result;
+			bit<KEY_VALUE_SIZE> stash_fourth_result;
+			bit<KEY_VALUE_SIZE> stash_fifth_result;
+			bit<KEY_VALUE_SIZE> stash_sixth_result;
+			bit<KEY_VALUE_SIZE> stash_seventh_result;
+			bit<KEY_VALUE_SIZE> stash_eighth_result;
 			inserted_keys.read(inserted_keys_read, 0);
 			packet_key = 64w0 ++ hdr.ipv4.srcAddr;
 			last_key.write(0, packet_key) ;
