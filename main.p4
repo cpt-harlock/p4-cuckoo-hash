@@ -64,7 +64,7 @@ register<bit<32>>(1) counter_reg;
 	bool bool2 = ch_second_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
 	bool bool3 = ch_third_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
 	bool bool4 = ch_fourth_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
-	if (bool1 && bool2 && bool3 && bool4) {\
+	if (bool1 || bool2 || bool3 || bool4) {\
 		resubmit_preserving_field_list(1);\
 	}\
 }
