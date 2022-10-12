@@ -1,6 +1,6 @@
 #include <v1model.p4>
 #include <core.p4>
-#include <header.p4>
+#include "header.p4"
 
 typedef bit<9>  egressSpec_t;
 typedef bit<48> macAddr_t;
@@ -32,7 +32,7 @@ register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_third_table;
 register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_fourth_table;
 register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_first_stash;
 register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_second_stash;
-register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_thid_stash;
+register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_third_stash;
 register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_fourth_stash;
 register<bit<32>>(1) ch_first_stash_counter;
 register<bit<32>>(1) ch_second_stash_counter;
@@ -48,76 +48,25 @@ register<bit<32>>(1) kicked_keys;
 register<bit<32>>(1) debug;
 register<bit<32>>(1) debug_1;
 register<bit<32>>(1) debug_2;
+register<bit<32>>(1) counter_reg;
 
-//#define INSERT_FIRST_CUCKOO(input, index, output) { \
-//	if (index[8:8] == 0 ) { \
-//		INSERT_INTO_CUCKOO(input, 1w0, ch_first_row_
-//		ch_first_row_even.read(output, 24w0 ++ index[7:0]); \
-//		ch_first_row_even.write(24w0 ++ index[7:0], input); \
-//	} else { \
-//		ch_first_row_odd.read(output, 24w0 ++ index[7:0]); \
-//		ch_first_row_odd.write(24w0 ++ index[7:0], input); \
-//	} \
-//}
-//
-//#define INSERT_SECOND_CUCKOO(input, index, output) { \
-//	bit<32> temp_hash; \
-//	hash(temp_hash, HashAlgorithm.crc32, 32w0, { 0w0, input[95:0]}, CH_LENGTH_BIT); \
-//	if (temp_hash[8:8] == 0 ) { \
-//		ch_second_row_even.read(output, 24w0 ++ index[7:0]); \
-//		ch_second_row_even.write(24w0 ++ index[7:0], input); \
-//	} else { \
-//		ch_second_row_odd.read(output, 24w0 ++ index[7:0]); \
-//		ch_second_row_odd.write(24w0 ++ index[7:0], input); \
-//	} \
-//}
-
-
-//TODO
-//#define STASH_MIX_3 { \
-//	bit<106> temp_stash_0; \
-//	bit<106> temp_1; \
-//	ch_stash.read(temp_stash_0, 0);	 \
-//	ch_stash.read(temp_1, 1);	 \
-//	ch_stash.write(0, temp_1);	 \
-//	ch_stash.read(temp_1, 2);	 \
-//	ch_stash.write(1, temp_1);	 \
-//	ch_stash.write(2, temp_stash_0);	 \
-//}
-//TODO	
-//#define STASH_MIX_4 { \
-//	bit<106> temp_stash_0; \
-//	bit<106> temp_1; \
-//	ch_stash.read(temp_stash_0, 0);	 \
-//	ch_stash.read(temp_1, 1);	 \
-//	ch_stash.write(0, temp_1);	 \
-//	ch_stash.read(temp_1, 2);	 \
-//	ch_stash.write(1, temp_1);	 \
-//	ch_stash.read(temp_1, 3);	 \
-//	ch_stash.write(2, temp_1);	 \
-//	ch_stash.write(3, temp_stash_0);	 \
-//}
-//#define STASH_MIX { \
-//	bit<3> stash_counter_read_value; \
-//	ch_stash_counter.read(stash_counter_read_value, 0); \
-//	if (stash_counter_read_value == 3) { \
-//		STASH_MIX_3 \
-//	} \
-//	if (stash_counter_read_value == 4) { \
-//		STASH_MIX_4 \
-//	} \
-//}
-
-// zeroing input variables 
 
 #define STASH_RECIRCULATE { \
-	bit<2> odd_stash_counter_read_value; \
-	bit<2> even_stash_counter_read_value; \
-	ch_stash_counter_odd.read(odd_stash_counter_read_value, 0); \
-	ch_stash_counter_even.read(even_stash_counter_read_value, 0); \
-	if (odd_stash_counter_read_value > 0 && even_stash_counter_read_value > 0 ) { \
-			resubmit_preserving_field_list(1); \
-	} \
+	bit<32> ch_first_stash_counter_read;\
+	bit<32> ch_second_stash_counter_read;\
+	bit<32> ch_third_stash_counter_read;\
+	bit<32> ch_fourth_stash_counter_read;\
+	ch_first_stash_counter.read(ch_first_stash_counter_read, 0);\
+	ch_second_stash_counter.read(ch_second_stash_counter_read, 0);\
+	ch_third_stash_counter.read(ch_third_stash_counter_read, 0);\
+	ch_fourth_stash_counter.read(ch_fourth_stash_counter_read, 0);\
+	bool bool1 = ch_first_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
+	bool bool2 = ch_second_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
+	bool bool3 = ch_third_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
+	bool bool4 = ch_fourth_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR;\
+	if (bool1 && bool2 && bool3 && bool4) {\
+		resubmit_preserving_field_list(1);\
+	}\
 }
 	
 
@@ -231,16 +180,21 @@ control MyIngress(inout headers hdr,
 
 	//compute CH indices
 	apply {
-		bit<32> first_index;
-		bit<32> second_index;
+		bit<32> datapath_selection_index;
 		bit<96> packet_key;
-		bit<10> counter_result;
+		bit<32> counter_result;
 		bit<2> odd_stash_counter_result;
 		bit<2> even_stash_counter_result;
 		bit<106> first_result;
 		bit<106> second_result;
-		bit<106> stash_result_0;
-		bit<106> stash_result_1;
+		bit<106> stash_first_result;
+		bit<106> stash_second_result;
+		bit<106> stash_third_result;
+		bit<106> stash_fourth_result;
+		bit<106> stash_fifth_result;
+		bit<106> stash_sixth_result;
+		bit<106> stash_seventh_result;
+		bit<106> stash_eighth_result;
 		bit<106> temp;
 		bit<106> stash_evicted_1;
 		bit<106> stash_evicted_2;
@@ -261,58 +215,84 @@ control MyIngress(inout headers hdr,
 			last_key.write(0, packet_key) ;
 			counter_reg.read(counter_result, 0);
 			counter_reg.write(0, counter_result+1);
-			READ_FROM_CUCKOO(1w0, ch_first_level_first_tabe
-			hash(first_index, HashAlgorithm.crc32, 32w0, { 1w0, packet_key }, CH_LENGTH_BIT);
-			hash(second_index, HashAlgorithm.crc32, 32w0, { 1w1, packet_key }, CH_LENGTH_BIT);
-			//debug.write(0, first_index);
+			//computing datapath index
+			hash(datapath_selection_index, HashAlgorithm.crc32, 32w0, { 3w4, packet_key }, 32w4);
+			if (datapath_selection_index == 0) {
+				READ_FROM_CUCKOO(packet_key, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, first_result); 
+				READ_FROM_CUCKOO(packet_key, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_STASH(ch_first_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
+			} else if (datapath_selection_index == 1) {
+				READ_FROM_CUCKOO(packet_key, 1w0, ch_first_level_second_table, CH_LENGTH_BIT, first_result); 
+				READ_FROM_CUCKOO(packet_key, 1w1, ch_second_level_second_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_STASH(ch_second_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
+			} else if (datapath_selection_index == 2) {
+				READ_FROM_CUCKOO(packet_key, 1w0, ch_first_level_third_table, CH_LENGTH_BIT, first_result); 
+				READ_FROM_CUCKOO(packet_key, 1w1, ch_second_level_third_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_STASH(ch_third_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
+			} else {
+				READ_FROM_CUCKOO(packet_key, 1w0, ch_first_level_fourth_table, CH_LENGTH_BIT, first_result); 
+				READ_FROM_CUCKOO(packet_key, 1w1, ch_second_level_fourth_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_STASH(ch_fourth_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
+			}
 
-			if (first_index[8:8]==0) {
-				ch_first_row_even.read(first_result, 24w0 ++ first_index[7:0]);
-				ch_second_row_even.read(second_result, 24w0 ++ second_index[7:0]);
-				ch_stash_odd.read(stash_result_0, 0);
-				ch_stash_odd.read(stash_result_1, 1);
-			}
-			else {
-				ch_first_row_odd.read(first_result, 24w0 ++ first_index[7:0]);
-				ch_second_row_odd.read(second_result, 24w0 ++ second_index[7:0]);
-				ch_stash_even.read(stash_result_0, 0);
-				ch_stash_even.read(stash_result_1, 1);
-			}
 			hit_counter.read(hit_counter_read, 0);
+
 			if (first_result[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
 			} else if (second_result[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
-			} else if (stash_result_0[95:0] == packet_key) {
+			} else if (stash_first_result[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
-			} else if (stash_result_1[95:0] == packet_key) {
+			} else if (stash_second_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_third_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_fourth_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_fifth_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_sixth_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_seventh_result[95:0] == packet_key) {
+				hit_counter.write(0, hit_counter_read + 1);
+			} else if (stash_eighth_result[95:0] == packet_key) {
 				hit_counter.write(0, hit_counter_read + 1);
 			} else if (first_result[95:0] == 96w0) {
-				if (first_index[8:8]==0) {
-					ch_first_row_even.write(24w0 ++ first_index[7:0], 10w0 ++ packet_key);
-				}
-				else {
-					ch_first_row_odd.write(24w0 ++ first_index[7:0], 10w0 ++ packet_key);
-				}	
 				inserted_keys.write(0, inserted_keys_read+1);
+				if (datapath_selection_index == 0) {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, temp);
+				} else if (datapath_selection_index == 1) {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_second_table, CH_LENGTH_BIT, temp);
+				} else if (datapath_selection_index == 2) {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_third_table, CH_LENGTH_BIT, temp);
+				} else {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_fourth_table, CH_LENGTH_BIT, temp);
+				}
 			} else if (second_result[95:0] == 96w0) {
-				if (first_index[8:8]==0) {
-					ch_second_row_even.write(24w0 ++ second_index[7:0], 10w0 ++ packet_key);
-				}
-				else {
-					ch_second_row_odd.write(24w0 ++ second_index[7:0], 10w0 ++ packet_key);
-				}	
 				inserted_keys.write(0, inserted_keys_read+1);
-			} 
-			else if (odd_stash_counter_result < 2 || even_stash_counter_result < 2) {
-				STASH_INSERT(10w0 ++ packet_key, 106w0, 1)
-				STASH_RECIRCULATE
+				if (datapath_selection_index == 0) {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, temp);
+				} else if (datapath_selection_index == 1) {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_second_table, CH_LENGTH_BIT, temp);
+				} else if (datapath_selection_index == 2) {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_third_table, CH_LENGTH_BIT, temp);
+				} else {
+					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_fourth_table, CH_LENGTH_BIT, temp);
+				}
 			} 
 			else {
-				bit<32> discarded_keys_read;
-				discarded_keys.read(discarded_keys_read, 0);
-				discarded_keys.write(0, discarded_keys_read + 1);
-			}
+				if (datapath_selection_index == 0) {
+					INSERT_INTO_STASH(10w0 ++ packet_key, ch_first_stash, ch_first_stash_counter, 1);
+				} else if (datapath_selection_index == 1) {
+					INSERT_INTO_STASH(10w0 ++ packet_key, ch_second_stash, ch_second_stash_counter, 1);
+				} else if (datapath_selection_index == 2) {
+					INSERT_INTO_STASH(10w0 ++ packet_key, ch_third_stash, ch_third_stash_counter, 1);
+				} else {
+					INSERT_INTO_STASH(10w0 ++ packet_key, ch_fourth_stash, ch_fourth_stash_counter, 1);
+				}
+				// this macro depends on # of datapaths 
+				STASH_RECIRCULATE;
+			} 
 			// else just drop the key!
 			// for the moment just drop the packet after CH operations
 			mark_to_drop(standard_metadata);
@@ -320,16 +300,18 @@ control MyIngress(inout headers hdr,
 		} else {
 			//recirculation
 			bit<32> recirculation_counter_value;
-			// hash of evicted keys
-			bit<32> evicted_1_hash_first;
-			bit<32> evicted_1_hash_second;
-			bit<32> evicted_2_hash_first;
-			bit<32> evicted_2_hash_second;
-			// values read from the ch
-			bit<106> evicted_1_ch_first;
-			bit<106> evicted_2_ch_first;
-			bit<106> evicted_1_ch_second;
-			bit<106> evicted_2_ch_second;
+			bit<KEY_VALUE_SIZE> ch_first_stash_read;
+			bit<KEY_VALUE_SIZE> ch_second_stash_read;
+			bit<KEY_VALUE_SIZE> ch_third_stash_read;
+			bit<KEY_VALUE_SIZE> ch_fourth_stash_read;
+			bit<KEY_VALUE_SIZE> ch_first_level_first_table_read;
+			bit<KEY_VALUE_SIZE> ch_first_level_second_table_read;
+			bit<KEY_VALUE_SIZE> ch_first_level_third_table_read;
+			bit<KEY_VALUE_SIZE> ch_first_level_fourth_table_read;
+			bit<KEY_VALUE_SIZE> ch_second_level_first_table_read;
+			bit<KEY_VALUE_SIZE> ch_second_level_second_table_read;
+			bit<KEY_VALUE_SIZE> ch_second_level_third_table_read;
+			bit<KEY_VALUE_SIZE> ch_second_level_fourth_table_read;
 			recirculation_counter.read(recirculation_counter_value, 0);
 			recirculation_counter.write(0, recirculation_counter_value + 1);
 			//leave the recirculation counter
@@ -340,26 +322,32 @@ control MyIngress(inout headers hdr,
 			meta.recirculation_counter = meta.recirculation_counter + 1;
 			/* DEBUG ZONE */
 			//ch_stash_counter.read(stash_counter_result, 0);
-			//debug_2.write(0, 29w0 ++ stash_counter_result);
+			//debug_2.writeS(0, 29w0 ++ stash_counter_result);
 			/**************/
-			STASH_READ(stash_evicted_1, stash_evicted_2)
-			//compute two hash per key
-			hash(evicted_1_hash_first, HashAlgorithm.crc32, 32w0, { 0w0, stash_evicted_1[95:0]}, CH_LENGTH_BIT);
-			hash(evicted_2_hash_first, HashAlgorithm.crc32, 32w0, { 0w0, stash_evicted_2[95:0]}, CH_LENGTH_BIT);
 
-			//access two different memories
-			INSERT_FIRST_CUCKOO(stash_evicted_1, evicted_1_hash_first, evicted_1_ch_first)
-			INSERT_FIRST_CUCKOO(stash_evicted_2, evicted_2_hash_first, evicted_2_ch_first)
+			//evict from stash
+			EVICT_FROM_STASH(ch_first_stash, ch_first_stash_counter, ch_first_stash_read);
+			EVICT_FROM_STASH(ch_second_stash, ch_second_stash_counter, ch_second_stash_read);
+			EVICT_FROM_STASH(ch_third_stash, ch_third_stash_counter, ch_third_stash_read);
+			EVICT_FROM_STASH(ch_fourth_stash, ch_fourth_stash_counter, ch_fourth_stash_read);
 
-			hash(evicted_1_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_1_ch_first[95:0]}, CH_LENGTH_BIT);
-			hash(evicted_2_hash_second, HashAlgorithm.crc32, 32w0, { 1w0, evicted_2_ch_first[95:0]}, CH_LENGTH_BIT);
+			//insert into first level cuckoo
+			INSERT_INTO_CUCKOO(ch_first_stash_read, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, ch_first_level_first_table_read);
+			INSERT_INTO_CUCKOO(ch_second_stash_read, 1w0, ch_first_level_second_table, CH_LENGTH_BIT, ch_first_level_second_table_read);
+			INSERT_INTO_CUCKOO(ch_third_stash_read, 1w0, ch_first_level_third_table, CH_LENGTH_BIT, ch_first_level_third_table_read);
+			INSERT_INTO_CUCKOO(ch_fourth_stash_read, 1w0, ch_first_level_fourth_table, CH_LENGTH_BIT, ch_first_level_fourth_table_read);
 
-			INSERT_SECOND_CUCKOO(evicted_1_ch_first, evicted_1_hash_second, evicted_1_ch_second);
-			INSERT_SECOND_CUCKOO(evicted_2_ch_first, evicted_2_hash_second, evicted_2_ch_second);
+			//insert into second level cuckoo
+			INSERT_INTO_CUCKOO(ch_first_level_first_table_read, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, ch_second_level_first_table_read);
+			INSERT_INTO_CUCKOO(ch_first_level_second_table_read, 1w1, ch_second_level_second_table, CH_LENGTH_BIT, ch_second_level_second_table_read);
+			INSERT_INTO_CUCKOO(ch_first_level_third_table_read, 1w1, ch_second_level_third_table, CH_LENGTH_BIT, ch_second_level_third_table_read);
+			INSERT_INTO_CUCKOO(ch_first_level_fourth_table_read, 1w1, ch_second_level_fourth_table, CH_LENGTH_BIT, ch_second_level_fourth_table_read);
 
-			STASH_INSERT(evicted_1_ch_second, evicted_2_ch_second, 0)
-			//STASH_MIX
-			// recirculate trying to free the stash
+			//insert into stash
+			INSERT_INTO_STASH(ch_second_level_first_table_read, ch_first_stash, ch_first_stash_counter, 0);
+			INSERT_INTO_STASH(ch_second_level_second_table_read, ch_second_stash, ch_second_stash_counter, 0);
+			INSERT_INTO_STASH(ch_second_level_third_table_read, ch_third_stash, ch_third_stash_counter, 0);
+			INSERT_INTO_STASH(ch_second_level_fourth_table_read, ch_fourth_stash, ch_fourth_stash_counter, 0);
 			STASH_RECIRCULATE
 				
 			//bit<106> debug_value;
