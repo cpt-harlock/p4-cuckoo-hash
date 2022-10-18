@@ -19,6 +19,13 @@ typedef bit<32> ip4Addr_t;
 #define CH_LENGTH 512
 #define CH_LENGTH_BIT 32w512
 
+
+// hash keys
+#define CH_FIRST_HASH_KEY 8w0
+#define CH_SECOND_HASH_KEY 8w7
+#define CH_FIRST_HASH_REVERSE 0
+#define CH_SECOND_HASH_REVERSE 1
+
 // 106 bits per register, first 96 bits for key and others for value 
 register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_first_table;
 register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_first_table;
@@ -31,6 +38,11 @@ register<bit<32>>(1) recirculation_counter;
 register<bit<32>>(1) inserted_keys;
 register<bit<32>>(1) discarded_keys;
 register<bit<32>>(1) kicked_keys;
+register<bit<32>>(1) stash_evicted_key_hash_1;
+register<bit<32>>(1) stash_evicted_key_hash_2;
+register<bit<32>>(1) ch_evicted_key_hash_1;
+register<bit<32>>(1) ch_evicted_key_hash_2;
+register<bit<KEY_VALUE_SIZE>>(1) last2_evicted_key;
 register<bit<KEY_VALUE_SIZE>>(1) last_evicted_key;
 register<bit<32>>(1) hash_stash_evicted_key;
 register<bit<32>>(1) hash_ch_evicted_key;
@@ -218,8 +230,8 @@ control MyIngress(inout headers hdr,
 				counter_reg.read(counter_result, 0);
 				counter_reg.write(0, counter_result+1);
 				//computing datapath index
-				READ_FROM_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, first_result); 
-				READ_FROM_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, CH_FIRST_HASH_REVERSE, crc16); 
+				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, CH_SECOND_HASH_REVERSE, crc32); 
 				READ_FROM_STASH(ch_first_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
 
 				hit_counter.read(hit_counter_read, 0);
@@ -246,11 +258,11 @@ control MyIngress(inout headers hdr,
 					hit_counter.write(0, hit_counter_read + 1);
 				} else if (first_result[95:0] == 96w0) {
 					inserted_keys.write(0, inserted_keys_read+1);
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, temp);
+					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, crc16);
 					assert( temp == KEY_VALUE_SIZE_BIT);
 				} else if (second_result[95:0] == 96w0) {
 					inserted_keys.write(0, inserted_keys_read+1);
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, temp);
+					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, crc32);
 					assert( temp == KEY_VALUE_SIZE_BIT);
 				} 
 				else {
@@ -289,20 +301,29 @@ control MyIngress(inout headers hdr,
 
 				//evict from stash
 				EVICT_FROM_STASH(ch_first_stash, ch_first_stash_counter, ch_first_stash_read);
+
+				//DEBUG
 				last_evicted_key.write(0, ch_first_stash_read);
 				bit<32> boh;
 				bit<32> boh1;
-				hash(boh, HashAlgorithm.xor16, 32w0, { 1w0, ch_first_stash_read[KEY_SIZE-1:0]}, CH_LENGTH_BIT);
-				hash_stash_evicted_key.write(0, boh);	
+				hash(boh, HashAlgorithm.crc16, 32w0, { CH_FIRST_HASH_KEY, ch_first_stash_read[KEY_SIZE-1:0]}, CH_LENGTH_BIT);
+				stash_evicted_key_hash_1.write(0, boh);	
+				hash(boh, HashAlgorithm.crc32, 32w0, {ch_first_stash_read[KEY_SIZE-1:0], CH_SECOND_HASH_KEY}, CH_LENGTH_BIT);
+				stash_evicted_key_hash_2.write(0, boh);	
 
 				//insert into first level cuckoo
-				INSERT_INTO_CUCKOO(ch_first_stash_read, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, ch_first_level_first_table_read);
-				hash(boh1, HashAlgorithm.xor16, 32w0, { 1w1, ch_first_level_first_table_read[KEY_SIZE-1:0]}, CH_LENGTH_BIT);
-				hash_ch_evicted_key.write(0, boh1);
+				INSERT_INTO_CUCKOO_ALGO(ch_first_stash_read, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, ch_first_level_first_table_read, CH_FIRST_HASH_REVERSE, crc16);
+
+				//DEBUG
+				last2_evicted_key.write(0, ch_first_level_first_table_read);
+				hash(boh1, HashAlgorithm.crc16, 32w0, { CH_FIRST_HASH_KEY, ch_first_level_first_table_read[KEY_SIZE-1:0]}, CH_LENGTH_BIT);
+				ch_evicted_key_hash_1.write(0, boh1);
+				hash(boh1, HashAlgorithm.crc32, 32w0, { ch_first_level_first_table_read[KEY_SIZE-1:0], CH_SECOND_HASH_KEY}, CH_LENGTH_BIT);
+				ch_evicted_key_hash_2.write(0, boh1);
 				
 
 				//insert into second level cuckoo
-				INSERT_INTO_CUCKOO(ch_first_level_first_table_read, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, ch_second_level_first_table_read);
+				INSERT_INTO_CUCKOO_ALGO(ch_first_level_first_table_read, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, ch_second_level_first_table_read, CH_SECOND_HASH_REVERSE, crc32);
 
 				//insert into stash
 				INSERT_INTO_STASH(ch_second_level_first_table_read, ch_first_stash, ch_first_stash_counter, 0);
