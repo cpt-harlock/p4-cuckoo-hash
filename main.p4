@@ -20,6 +20,12 @@ typedef bit<32> ip4Addr_t;
 #define CH_LENGTH 256
 #define CH_LENGTH_BIT 32w256
 
+// hash keys
+#define CH_FIRST_HASH_KEY 8w0
+#define CH_SECOND_HASH_KEY 8w7
+#define CH_FIRST_HASH_REVERSE 0
+#define CH_SECOND_HASH_REVERSE 1
+#
 // 106 bits per register, first 96 bits for key and others for value 
 // two levels of ch, 4 tables per level (4 parallel datapaths)
 register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_first_table;
@@ -34,6 +40,10 @@ register<bit<32>>(1) ch_second_stash_counter;
 register<bit<32>>(1) hit_counter;
 register<bit<96>>(1) last_key;
 register<bit<32>>(1) recirculation_counter;
+register<bit<32>>(1) succesfull_recirculation;
+register<bit<32>>(1) new_recirculation;
+register<bit<32>>(1) recirculating;
+register<bit<32>>(1) stop_flag;
 register<bit<32>>(1) inserted_keys;
 register<bit<32>>(1) discarded_keys;
 register<bit<32>>(1) kicked_keys;
@@ -42,15 +52,34 @@ register<bit<32>>(1) debug_1;
 register<bit<32>>(1) debug_2;
 register<bit<32>>(1) counter_reg;
 
-#define STASH_RECIRCULATE { \
+#define STASH_RECIRCULATE(flag) { \
+	bit<32> recirculating_value; \
+	bit<32> new_recirculation_value; \
+	bit<32> succesfull_recirculation_value; \
+	recirculating.read(recirculating_value, 0); \
 	bit<32> ch_first_stash_counter_read;\
 	bit<32> ch_second_stash_counter_read;\
 	ch_first_stash_counter.read(ch_first_stash_counter_read, 0);\
 	ch_second_stash_counter.read(ch_second_stash_counter_read, 0);\
-	bool bool1 = ch_first_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR; \ 
-	bool bool2 = ch_second_stash_counter_read >= STASH_LENGTH/STASH_RECIRCULATION_LOAD_FACTOR; \ 
-	if (bool1 && bool2) {\
-		resubmit_preserving_field_list(1);\
+	bool bool1 = ch_first_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD; \ 
+	bool bool2 = ch_second_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD; \ 
+	if (flag == 1) { \
+		if (recirculating_value == 0) { \
+			if (bool1 && bool2) {\
+				resubmit_preserving_field_list(1);\
+				recirculating.write(0, 1); \
+				new_recirculation.read(new_recirculation_value, 0); \
+				new_recirculation.write(0, new_recirculation_value + 1); \
+			}\
+		} \
+	} else { \
+		if (bool1 && bool2) {\
+			resubmit_preserving_field_list(1);\
+		} else {\
+			recirculating.write(0, 0); \
+			succesfull_recirculation.read(succesfull_recirculation_value, 0); \
+			succesfull_recirculation.write(0, succesfull_recirculation_value + 1); \
+		}\
 	}\
 }
 
@@ -198,12 +227,12 @@ control MyIngress(inout headers hdr,
 			//computing datapath index
 			hash(datapath_selection_index, HashAlgorithm.crc32, 32w0, { 3w4, packet_key }, 32w2);
 			if (datapath_selection_index == 0) {
-				READ_FROM_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, first_result); 
-				READ_FROM_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, CH_FIRST_HASH_REVERSE, crc16); 
+				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, CH_SECOND_HASH_REVERSE, crc32); 
 				READ_FROM_STASH(ch_first_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
 			} else {
-				READ_FROM_CUCKOO(packet_key, 1w0, ch_first_level_second_table, CH_LENGTH_BIT, first_result); 
-				READ_FROM_CUCKOO(packet_key, 1w1, ch_second_level_second_table, CH_LENGTH_BIT, second_result); 
+				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_second_table, CH_LENGTH_BIT, first_result, CH_FIRST_HASH_REVERSE, crc16); 
+				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_second_table, CH_LENGTH_BIT, second_result, CH_SECOND_HASH_REVERSE, crc32); 
 				READ_FROM_STASH(ch_second_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
 			}
 
@@ -232,16 +261,16 @@ control MyIngress(inout headers hdr,
 			} else if (first_result[95:0] == 96w0) {
 				inserted_keys.write(0, inserted_keys_read+1);
 				if (datapath_selection_index == 0) {
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, temp);
+					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, crc16);
 				} else {
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w0, ch_first_level_second_table, CH_LENGTH_BIT, temp);
+					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_second_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, crc16);
 				}
 			} else if (second_result[95:0] == 96w0) {
 				inserted_keys.write(0, inserted_keys_read+1);
 				if (datapath_selection_index == 0) {
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, temp);
+					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, crc32);
 				} else {
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, 1w1, ch_second_level_second_table, CH_LENGTH_BIT, temp);
+					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_second_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, crc32);
 				}
 			} 
 			else {
@@ -251,7 +280,7 @@ control MyIngress(inout headers hdr,
 					INSERT_INTO_STASH(10w0 ++ packet_key, ch_second_stash, ch_second_stash_counter, 1);
 				}
 				// this macro depends on # of datapaths 
-				STASH_RECIRCULATE;
+				STASH_RECIRCULATE(1);
 			} 
 			// else just drop the key!
 			// for the moment just drop the packet after CH operations
@@ -284,19 +313,20 @@ control MyIngress(inout headers hdr,
 			EVICT_FROM_STASH(ch_second_stash, ch_second_stash_counter, ch_second_stash_read);
 
 			//insert into first level cuckoo
-			INSERT_INTO_CUCKOO(ch_first_stash_read, 1w0, ch_first_level_first_table, CH_LENGTH_BIT, ch_first_level_first_table_read);
-			INSERT_INTO_CUCKOO(ch_second_stash_read, 1w0, ch_first_level_second_table, CH_LENGTH_BIT, ch_first_level_second_table_read);
+			INSERT_INTO_CUCKOO_ALGO(ch_first_stash_read, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, ch_first_level_first_table_read, CH_FIRST_HASH_REVERSE, crc16);
+			INSERT_INTO_CUCKOO_ALGO(ch_second_stash_read, CH_FIRST_HASH_KEY, ch_first_level_second_table, CH_LENGTH_BIT, ch_first_level_second_table_read, CH_FIRST_HASH_REVERSE, crc16);
 
 			//insert into second level cuckoo
-			INSERT_INTO_CUCKOO(ch_first_level_first_table_read, 1w1, ch_second_level_first_table, CH_LENGTH_BIT, ch_second_level_first_table_read);
-			INSERT_INTO_CUCKOO(ch_first_level_second_table_read, 1w1, ch_second_level_second_table, CH_LENGTH_BIT, ch_second_level_second_table_read);
+			INSERT_INTO_CUCKOO_ALGO(ch_first_level_first_table_read, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, ch_second_level_first_table_read, CH_SECOND_HASH_REVERSE, crc32);
+			INSERT_INTO_CUCKOO_ALGO(ch_first_level_second_table_read, CH_SECOND_HASH_KEY, ch_second_level_second_table, CH_LENGTH_BIT, ch_second_level_second_table_read, CH_SECOND_HASH_REVERSE, crc32);
 
 			//insert into stash
 			INSERT_INTO_STASH(ch_second_level_first_table_read, ch_first_stash, ch_first_stash_counter, 0);
 			INSERT_INTO_STASH(ch_second_level_second_table_read, ch_second_stash, ch_second_stash_counter, 0);
 
 			STASH_MIX(ch_first_stash, ch_first_stash_counter);
-			STASH_RECIRCULATE;
+			STASH_MIX(ch_second_stash, ch_second_stash_counter);
+			STASH_RECIRCULATE(0);
 
 		} 
 	}
