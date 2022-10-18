@@ -25,6 +25,7 @@ typedef bit<32> ip4Addr_t;
 #define CH_SECOND_HASH_KEY 8w7
 #define CH_FIRST_HASH_REVERSE 0
 #define CH_SECOND_HASH_REVERSE 1
+#define CH_DATAPATH_HASH_KEY 8w3
 
 // 106 bits per register, first 96 bits for key and others for value 
 // two levels of ch, 4 tables per level (4 parallel datapaths)
@@ -245,7 +246,7 @@ control MyIngress(inout headers hdr,
 			counter_reg.read(counter_result, 0);
 			counter_reg.write(0, counter_result+1);
 			//computing datapath index
-			hash(datapath_selection_index, HashAlgorithm.crc32, 32w0, { 3w4, packet_key }, 32w4);
+			hash(datapath_selection_index, HashAlgorithm.crc32, 32w0, { CH_DATAPATH_HASH_KEY, packet_key }, 32w4);
 			if (datapath_selection_index == 0) {
 				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, CH_FIRST_HASH_REVERSE, crc16); 
 				READ_FROM_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, CH_SECOND_HASH_REVERSE, crc32); 
