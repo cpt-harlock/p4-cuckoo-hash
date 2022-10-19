@@ -222,8 +222,7 @@ control MyIngress(inout headers hdr,
 
 		bit<32> stop_flag_value;
 		stop_flag.read(stop_flag_value, 0);
-		if (true) {
-		//if (stop_flag_value == 0) {
+		if (stop_flag_value == 0) {
 			if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
 				inserted_keys.read(inserted_keys_read, 0);
 				packet_key = 64w0 ++ hdr.ipv4.srcAddr;
