@@ -52,6 +52,7 @@ register<bit<32>>(1) debug_1;
 register<bit<32>>(1) debug_2;
 register<bit<32>>(1) counter_reg;
 
+#define RECIRCULATION_CONDITION ||
 #define STASH_RECIRCULATE(flag) { \
 	bit<32> recirculating_value; \
 	bit<32> new_recirculation_value; \
@@ -65,7 +66,7 @@ register<bit<32>>(1) counter_reg;
 	bool bool2 = ch_second_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD; \ 
 		if (flag == 1) { \
 			if (recirculating_value == 0) { \
-				if (bool1 || bool2) {\
+				if (bool1 RECIRCULATION_CONDITION bool2) {\
 					resubmit_preserving_field_list(1);\
 						recirculating.write(0, 1); \
 						new_recirculation.read(new_recirculation_value, 0); \
@@ -77,13 +78,13 @@ register<bit<32>>(1) counter_reg;
 				mark_to_drop(standard_metadata); \
 			} \
 		} else { \
-			if (bool1 || bool2) {\
+			if (bool1 RECIRCULATION_CONDITION bool2) {\
 				resubmit_preserving_field_list(1);\
 			} else {\
 				recirculating.write(0, 0); \
-					succesfull_recirculation.read(succesfull_recirculation_value, 0); \
-					succesfull_recirculation.write(0, succesfull_recirculation_value + 1); \
-					mark_to_drop(standard_metadata); \
+				succesfull_recirculation.read(succesfull_recirculation_value, 0); \
+				succesfull_recirculation.write(0, succesfull_recirculation_value + 1); \
+				mark_to_drop(standard_metadata); \
 			}\
 		}\
 }
@@ -325,6 +326,9 @@ control MyIngress(inout headers hdr,
 				//debug_2.write(0, 29w0 ++ stash_counter_result);
 				/**************/
 
+				//first mix -> FIFO
+				STASH_MIX(ch_first_stash, ch_first_stash_counter);
+				STASH_MIX(ch_second_stash, ch_second_stash_counter);
 				//evict from stash
 				EVICT_FROM_STASH(ch_first_stash, ch_first_stash_counter, ch_first_stash_read);
 				EVICT_FROM_STASH(ch_second_stash, ch_second_stash_counter, ch_second_stash_read);
@@ -341,8 +345,6 @@ control MyIngress(inout headers hdr,
 				INSERT_INTO_STASH(ch_second_level_first_table_read, ch_first_stash, ch_first_stash_counter, 0);
 				INSERT_INTO_STASH(ch_second_level_second_table_read, ch_second_stash, ch_second_stash_counter, 0);
 
-				STASH_MIX(ch_first_stash, ch_first_stash_counter);
-				STASH_MIX(ch_second_stash, ch_second_stash_counter);
 				STASH_RECIRCULATE(0);
 
 			} 
