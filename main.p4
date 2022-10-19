@@ -68,7 +68,11 @@ register<bit<32>>(1) new_recirculation;
 				recirculating.write(0, 1); \
 				new_recirculation.read(new_recirculation_value, 0); \
 				new_recirculation.write(0, new_recirculation_value + 1); \
-			}\
+			} else { \
+				mark_to_drop(standard_metadata); \
+			} \
+		} else { \
+			mark_to_drop(standard_metadata); \
 		}\
 	} else {\
 		if (bool1) {\
@@ -77,6 +81,7 @@ register<bit<32>>(1) new_recirculation;
 			recirculating.write(0, 0); \
 			succesfull_recirculation.read(succesfull_recirculation_value, 0); \
 			succesfull_recirculation.write(0, succesfull_recirculation_value + 1); \
+			mark_to_drop(standard_metadata); \
 		}\
 	}\
 }
