@@ -51,6 +51,7 @@ register<bit<32>>(1) stop_flag;
 register<bit<32>>(1) recirculating;
 register<bit<32>>(1) succesfull_recirculation;
 register<bit<32>>(1) new_recirculation;
+register<bit<32>>(1) total_packets;
 
 
 #define STASH_RECIRCULATE(flag) { \
@@ -217,6 +218,7 @@ control MyIngress(inout headers hdr,
 		bit<106> stash_evicted_2;
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
+		bit<32> total_packets_value;
 
 
 		if (standard_metadata.parser_error != error.NoError) {
@@ -225,6 +227,9 @@ control MyIngress(inout headers hdr,
 			exit;
 		}
 
+
+		total_packets.read(total_packets_value, 0);
+		total_packets.write(0, total_packets_value + 1);
 		bit<32> stop_flag_value;
 		stop_flag.read(stop_flag_value, 0);
 		if (stop_flag_value == 0) {
@@ -291,7 +296,7 @@ control MyIngress(inout headers hdr,
 				bit<KEY_VALUE_SIZE> ch_second_level_first_table_read;
 				//leave the recirculation counter
 				if (meta.recirculation_counter == LOOP_LIMIT) {
-					mark_to_drop(standard_metadata);
+					mark_to_drop(standard_metadata); 
 					recirculating.write(0, 0);
 					//stop_flag.write(0, 1);
 					return;
