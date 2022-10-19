@@ -61,6 +61,7 @@ register<bit<32>>(1) debug_1;
 register<bit<32>>(1) debug_2;
 register<bit<32>>(1) counter_reg;
 
+#define RECIRCULATION_CONDITION ||
 
 #define STASH_RECIRCULATE(flag) { \
 	bit<32> recirculating_value; \
@@ -81,7 +82,7 @@ register<bit<32>>(1) counter_reg;
 	bool bool4 = ch_fourth_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD;\
 	if (flag == 1) { \
 		if (recirculating_value == 0) { \
-			if (bool1 || bool2 || bool3 || bool4) {\
+			if (bool1 RECIRCULATION_CONDITION bool2 RECIRCULATION_CONDITION bool3 RECIRCULATION_CONDITION bool4) {\
 				resubmit_preserving_field_list(1);\
 				recirculating.write(0, 1); \
 				new_recirculation.read(new_recirculation_value, 0); \
@@ -93,7 +94,7 @@ register<bit<32>>(1) counter_reg;
 			mark_to_drop(standard_metadata); \
 		} \
 	} else {\
-		if (bool1 || bool2 || bool3 || bool4) {\
+		if (bool1 RECIRCULATION_CONDITION bool2 RECIRCULATION_CONDITION bool3 RECIRCULATION_CONDITION bool4) {\
 			resubmit_preserving_field_list(1);\
 		} else {\
 			recirculating.write(0, 0); \
@@ -243,7 +244,9 @@ control MyIngress(inout headers hdr,
 			exit;
 		}
 
-
+		bit<32> stop_flag_value;
+		stop_flag.read(stop_flag_value, 0);
+		if (stop_flag_value == 0 ) { 
 		if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
 			inserted_keys.read(inserted_keys_read, 0);
 			packet_key = 64w0 ++ hdr.ipv4.srcAddr;
@@ -326,11 +329,14 @@ control MyIngress(inout headers hdr,
 					INSERT_INTO_STASH(10w0 ++ packet_key, ch_fourth_stash, ch_fourth_stash_counter, 1);
 				}
 				// this macro depends on # of datapaths 
-				STASH_RECIRCULATE(1);
+				stop_flag.read(stop_flag_value, 0);
+				if (stop_flag_value == 0) { 
+					STASH_RECIRCULATE(1);
+				}
 			} 
 			// else just drop the key!
 			// for the moment just drop the packet after CH operations
-			//mark_to_drop(standard_metadata);
+			mark_to_drop(standard_metadata);
 
 		} else {
 			//recirculation
@@ -402,6 +408,7 @@ control MyIngress(inout headers hdr,
 			//debug.write(0, debug_value[31:0]);
 			//debug_1.write(0, debug_1_value[31:0]);
 		} 
+	}
 	}
 }
 
