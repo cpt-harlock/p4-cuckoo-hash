@@ -14,7 +14,6 @@ typedef bit<32> ip4Addr_t;
 #define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
 #define PKT_INSTANCE_TYPE_REPLICATION 5
 #define PKT_INSTANCE_TYPE_RESUBMIT 6
-#define LOOP_LIMIT 50
 
 //two path of 256
 #define CH_LENGTH 256
@@ -41,6 +40,7 @@ register<bit<32>>(1) hit_counter;
 register<bit<96>>(1) last_key;
 register<bit<32>>(1) recirculation_counter;
 register<bit<32>>(1) succesfull_recirculation;
+register<bit<32>>(1) unsuccesfull_recirculation;
 register<bit<32>>(1) new_recirculation;
 register<bit<32>>(1) recirculating;
 register<bit<32>>(1) stop_flag;
@@ -65,20 +65,25 @@ register<bit<32>>(1) counter_reg;
 	bool bool2 = ch_second_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD; \ 
 	if (flag == 1) { \
 		if (recirculating_value == 0) { \
-			if (bool1 && bool2) {\
+			if (bool1 || bool2) {\
 				resubmit_preserving_field_list(1);\
 				recirculating.write(0, 1); \
 				new_recirculation.read(new_recirculation_value, 0); \
 				new_recirculation.write(0, new_recirculation_value + 1); \
-			}\
+			} else { \
+				mark_to_drop(standard_metadata); \
+			} \
+		} else { \
+			mark_to_drop(standard_metadata); \
 		} \
 	} else { \
-		if (bool1 && bool2) {\
+		if (bool1 || bool2) {\
 			resubmit_preserving_field_list(1);\
 		} else {\
 			recirculating.write(0, 0); \
 			succesfull_recirculation.read(succesfull_recirculation_value, 0); \
 			succesfull_recirculation.write(0, succesfull_recirculation_value + 1); \
+			mark_to_drop(standard_metadata); \
 		}\
 	}\
 }
@@ -284,7 +289,7 @@ control MyIngress(inout headers hdr,
 			} 
 			// else just drop the key!
 			// for the moment just drop the packet after CH operations
-			mark_to_drop(standard_metadata);
+			//mark_to_drop(standard_metadata);
 
 		} else {
 			//recirculation
@@ -300,6 +305,10 @@ control MyIngress(inout headers hdr,
 			//leave the recirculation counter
 			if (meta.recirculation_counter == LOOP_LIMIT) {
 				mark_to_drop(standard_metadata);
+				bit<32> unsuccesfull_recirculation_value;
+				unsuccesfull_recirculation.read(unsuccesfull_recirculation_value, 0);
+				unsuccesfull_recirculation.write(0, unsuccesfull_recirculation_value + 1);
+				recirculating.write(0,0);
 				return;
 			}
 			meta.recirculation_counter = meta.recirculation_counter + 1;
