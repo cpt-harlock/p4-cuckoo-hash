@@ -1,6 +1,6 @@
 P4C = p4c
 #P4C = p4c-bm2-ss
-P4ARGS = --target bmv2 --arch v1model --std p4-16 -DLOOP_LIMIT=${LOOP_LIMIT}
+P4ARGS = --target bmv2 --arch v1model --std p4-16 
 all: main.p4
 	$(P4C) $(P4ARGS) $^
 	
