@@ -80,9 +80,16 @@ register<bit<32>>(1) counter_reg;
 	bool bool2 = ch_second_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD;\
 	bool bool3 = ch_third_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD;\
 	bool bool4 = ch_fourth_stash_counter_read >= STASH_RECIRCULATION_THRESHOLD;\
+	bool bool5 = ch_first_stash_counter_read >= STASH_LENGTH;\
+	bool bool6 = ch_second_stash_counter_read >= STASH_LENGTH;\
+	bool bool7 = ch_third_stash_counter_read >= STASH_LENGTH;\
+	bool bool8 = ch_fourth_stash_counter_read >= STASH_LENGTH;\
+	bool bool9 = bool1 && bool2 && bool3 && bool4; \
+	bool bool10 = bool5 || bool6 || bool7 || bool8;\
+	bool bool11 = bool9 || bool10;\
 	if (flag == 1) { \
 		if (recirculating_value == 0) { \
-			if (bool1 RECIRCULATION_CONDITION bool2 RECIRCULATION_CONDITION bool3 RECIRCULATION_CONDITION bool4) {\
+			if (bool11) {\
 				resubmit_preserving_field_list(1);\
 				recirculating.write(0, 1); \
 				new_recirculation.read(new_recirculation_value, 0); \
@@ -94,7 +101,7 @@ register<bit<32>>(1) counter_reg;
 			mark_to_drop(standard_metadata); \
 		} \
 	} else {\
-		if (bool1 RECIRCULATION_CONDITION bool2 RECIRCULATION_CONDITION bool3 RECIRCULATION_CONDITION bool4) {\
+		if (bool11) {\
 			resubmit_preserving_field_list(1);\
 		} else {\
 			recirculating.write(0, 0); \
