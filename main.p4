@@ -27,8 +27,8 @@ typedef bit<32> ip4Addr_t;
 #define CH_SECOND_HASH_REVERSE 1
 
 // 106 bits per register, first 96 bits for key and others for value 
-register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_first_table;
-register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_first_table;
+register<bit<BUCKET_SIZE>>(CH_LENGTH) ch_first_level_first_table;
+register<bit<BUCKET_SIZE>>(CH_LENGTH) ch_second_level_first_table;
 register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_first_stash;
 register<bit<32>>(1) ch_first_stash_counter;
 
