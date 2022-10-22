@@ -203,8 +203,8 @@ control MyIngress(inout headers hdr,
 		bit<32> counter_result;
 		bit<2> odd_stash_counter_result;
 		bit<2> even_stash_counter_result;
-		bit<106> first_result = 106w0;
-		bit<106> second_result = 106w0;
+		bit<BUCKET_SIZE> first_result;
+		bit<BUCKET_SIZE> second_result;
 		bit<106> stash_first_result = 106w0;
 		bit<106> stash_second_result = 106w0;
 		bit<106> stash_third_result = 106w0;
@@ -219,7 +219,6 @@ control MyIngress(inout headers hdr,
 		bit<32> hit_counter_read;
 		bit<32> inserted_keys_read;
 		bit<32> total_packets_value;
-
 
 		if (standard_metadata.parser_error != error.NoError) {
 			mark_to_drop(standard_metadata);
@@ -246,9 +245,17 @@ control MyIngress(inout headers hdr,
 
 				hit_counter.read(hit_counter_read, 0);
 
-				if (first_result[95:0] == packet_key) {
+				bool find_in_first = false; 
+				bool find_in_second = false; 
+				bool first_bucket_free = false;
+				bool second_bucket_free = false;
+				FIND_KEY_IN_BUCKET(packet_key, first_result, find_in_first);
+				FIND_KEY_IN_BUCKET(packet_key, second_result, find_in_second);
+				IS_FREE_SLOT_IN_BUCKET(first_result, first_bucket_free);
+				IS_FREE_SLOT_IN_BUCKET(second_result, second_bucket_free);
+				if (find_in_first) {
 					hit_counter.write(0, hit_counter_read + 1);
-				} else if (second_result[95:0] == packet_key) {
+				} else if (find_in_second) {
 					hit_counter.write(0, hit_counter_read + 1);
 				} else if (stash_first_result[95:0] == packet_key) {
 					hit_counter.write(0, hit_counter_read + 1);
@@ -266,11 +273,11 @@ control MyIngress(inout headers hdr,
 					hit_counter.write(0, hit_counter_read + 1);
 				} else if (stash_eighth_result[95:0] == packet_key) {
 					hit_counter.write(0, hit_counter_read + 1);
-				} else if (first_result[95:0] == 96w0) {
+				} else if (first_bucket_free) {
 					inserted_keys.write(0, inserted_keys_read+1);
 					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, crc16);
 					assert( temp == KEY_VALUE_SIZE_BIT);
-				} else if (second_result[95:0] == 96w0) {
+				} else if (second_bucket_free) {
 					inserted_keys.write(0, inserted_keys_read+1);
 					INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, crc32);
 					assert( temp == KEY_VALUE_SIZE_BIT);
