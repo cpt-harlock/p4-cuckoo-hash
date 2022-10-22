@@ -27,10 +27,10 @@ typedef bit<32> ip4Addr_t;
 #define CH_DATAPATH_HASH_KEY 8w3
 // 106 bits per register, first 96 bits for key and others for value 
 // two levels of ch, 4 tables per level (4 parallel datapaths)
-register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_first_table;
-register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_first_level_second_table;
-register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_first_table;
-register<bit<KEY_VALUE_SIZE>>(CH_LENGTH) ch_second_level_second_table;
+register<bit<BUCKET_SIZE>>(CH_LENGTH) ch_first_level_first_table;
+register<bit<BUCKET_SIZE>>(CH_LENGTH) ch_first_level_second_table;
+register<bit<BUCKET_SIZE>>(CH_LENGTH) ch_second_level_first_table;
+register<bit<BUCKET_SIZE>>(CH_LENGTH) ch_second_level_second_table;
 register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_first_stash;
 register<bit<KEY_VALUE_SIZE>>(STASH_LENGTH) ch_second_stash;
 register<bit<32>>(1) ch_first_stash_counter;
@@ -224,8 +224,8 @@ control MyIngress(inout headers hdr,
 		stop_flag.read(stop_flag_value, 0);
 		if ( stop_flag_value == 0) { 
 			if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
-				bit<KEY_VALUE_SIZE> first_result;
-				bit<KEY_VALUE_SIZE> second_result;
+				bit<BUCKET_SIZE> first_result;
+				bit<BUCKET_SIZE> second_result;
 				bit<KEY_VALUE_SIZE> stash_first_result;
 				bit<KEY_VALUE_SIZE> stash_second_result;
 				bit<KEY_VALUE_SIZE> stash_third_result;
@@ -252,10 +252,18 @@ control MyIngress(inout headers hdr,
 				}
 
 				hit_counter.read(hit_counter_read, 0);
+				bool find_in_first = false; 
+				bool find_in_second = false; 
+				bool first_bucket_free = false;
+				bool second_bucket_free = false;
+				FIND_KEY_IN_BUCKET(packet_key, first_result, find_in_first);
+				FIND_KEY_IN_BUCKET(packet_key, second_result, find_in_second);
+				IS_FREE_SLOT_IN_BUCKET(first_result, first_bucket_free);
+				IS_FREE_SLOT_IN_BUCKET(second_result, second_bucket_free);
 
-				if (first_result[95:0] == packet_key) {
+				if (find_in_first) {
 					hit_counter.write(0, hit_counter_read + 1);
-				} else if (second_result[95:0] == packet_key) {
+				} else if (find_in_second) {
 					hit_counter.write(0, hit_counter_read + 1);
 				} else if (stash_first_result[95:0] == packet_key) {
 					hit_counter.write(0, hit_counter_read + 1);
@@ -273,20 +281,22 @@ control MyIngress(inout headers hdr,
 					hit_counter.write(0, hit_counter_read + 1);
 				} else if (stash_eighth_result[95:0] == packet_key) {
 					hit_counter.write(0, hit_counter_read + 1);
-				} else if (first_result[95:0] == 96w0) {
+				} else if (first_bucket_free) {
 					inserted_keys.write(0, inserted_keys_read+1);
 					if (datapath_selection_index == 0) {
 						INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, crc16);
 					} else {
 						INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_second_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, crc16);
 					}
-				} else if (second_result[95:0] == 96w0) {
+					assert( temp == KEY_VALUE_SIZE_BIT);
+				} else if (second_bucket_free) {
 					inserted_keys.write(0, inserted_keys_read+1);
 					if (datapath_selection_index == 0) {
 						INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, crc32);
 					} else {
 						INSERT_INTO_CUCKOO_ALGO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_second_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, crc32);
 					}
+					assert( temp == KEY_VALUE_SIZE_BIT);
 				} 
 				else {
 					if (datapath_selection_index == 0) {
