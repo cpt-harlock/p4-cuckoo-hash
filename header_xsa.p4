@@ -198,7 +198,7 @@
 	bit<COUNTER_OUTPUT_SIZE> kicked_keys_read; \
 	if ((value)[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
 		if (count < stash_size) { \
-			// insert value without evicting
+			// insert value without evicting \
 			stash.apply(PREPARE_STASH_INPUT(value, 1w1, 1w0), stash_read); \
 			//counter.write(0, counter_read + 1); \
 			if (key_increment == 1)  { \
