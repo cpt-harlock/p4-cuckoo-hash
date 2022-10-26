@@ -11,16 +11,17 @@
 #define INDEX_SIZE 32
 // ch register
 //1 additional bit for R/W
-#define REGISTER_INPUT_SIZE BUCKET_SIZE+1+INDEX_SIZE 
+#define REGISTER_INPUT_SIZE (BUCKET_SIZE+1+INDEX_SIZE) 
 #define REGISTER_OUTPUT_SIZE BUCKET_SIZE
 #define REGISTER_LATENCY 1
 // stash
 //for stash , 1 bit R/W and 1 bit evict
-#define STASH_INPUT_SIZE KEY_VALUE_SIZE+1+1
+#define STASH_INPUT_SIZE (KEY_VALUE_SIZE+1+1)
 #define STASH_OUTPUT_SIZE (STASH_LENGTH*KEY_VALUE_SIZE)
 #define STASH_LATENCY 1
 // hasher 
-#define HASH_INPUT_SIZE KEY_SIZE
+#define HASH_PREFIX_LENGTH 8
+#define HASH_INPUT_SIZE (KEY_SIZE+HASH_PREFIX_LENGTH)
 #define HASH_OUTPUT_SIZE 32 
 #define HASH_LATENCY 1
 // counter
@@ -37,6 +38,10 @@
 #define FLAG_INPUT_READ 2w0
 #define FLAG_INPUT_SET 2w1
 #define FLAG_INPUT_RESET 2w2
+// recirculator, TODO, for the moment placeholders
+#define RECIRCULATION_INPUT_SIZE 30
+#define RECIRCULATION_OUTPUT_SIZE 30
+#define RECIRCULATION_LATENCY 1
 
 #ifndef STASH_RECIRCULATION_THRESHOLD
 	#define STASH_RECIRCULATION_THRESHOLD 1
@@ -111,17 +116,18 @@
 	FIND_IN_BUCKET_4(KEY_SIZE_BIT, bucket, output); \
 }
 
-#define PREPARE_CUCKOO_INPUT(index, we, key_value) { index, we, value }
+#define PREPARE_CUCKOO_INPUT(index, we, key_value) ( index ++ we ++ key_value )
 
 #define READ_FROM_CUCKOO(value, hash_prefix, cuckoo, cuckoo_length, output, reverse, hasher) { \
 	if ((value)[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
 		bit<32> temp_hash; \
 		if (reverse == 1) { \
-			hasher.apply({ (value)[KEY_SIZE-1:0], hash_prefix }, temp_hash); \
+			hasher.apply( (value)[KEY_SIZE-1:0] ++ hash_prefix , temp_hash); \
 		} else { \
-			hasher.apply({ hash_prefix, (value)[KEY_SIZE-1:0] }, temp_hash); \
+			hasher.apply( hash_prefix ++ (value)[KEY_SIZE-1:0] , temp_hash); \
 		} \
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(index, 1w0, BUCKET_SIZE_BIT), output); \
+		temp_hash = temp_hash % cuckoo_length; \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash, 1w0, BUCKET_SIZE_BIT), output); \
 	} else { \
 		output = BUCKET_SIZE_BIT; \
 	} \
@@ -177,15 +183,16 @@
 	bit<BUCKET_SIZE> dummy_read; \
 	if ((value)[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
 		if (reverse == 1) { \
-			hasher.apply({ (value)[KEY_SIZE-1:0], hash_prefix }, temp_hash); \
+			hasher.apply( (value)[KEY_SIZE-1:0] ++ hash_prefix , temp_hash); \
 		} else { \
-			hasher.apply({ hash_prefix, (value)[KEY_SIZE-1:0] }, temp_hash); \
+			hasher.apply( hash_prefix ++ (value)[KEY_SIZE-1:0] , temp_hash); \
 		} \
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(index, 1w0, BUCKET_SIZE_BIT), bucket); \
+		temp_hash = temp_hash % cuckoo_length; \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash, 1w0, BUCKET_SIZE_BIT), bucket); \
 		ROTATE_BUCKET(bucket); \ 
 		READ_FROM_BUCKET(bucket, output); \
 		INSERT_INTO_BUCKET(bucket, value); \ 	
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(index, 1w1, bucket), dummy_read); \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash, 1w1, bucket), dummy_read); \
 	} else { \
 		output = value; \
 	} \
@@ -196,18 +203,17 @@
 	bit<COUNTER_OUTPUT_SIZE> inserted_keys_read; \
 	bit<COUNTER_OUTPUT_SIZE> discarded_keys_read; \
 	bit<COUNTER_OUTPUT_SIZE> kicked_keys_read; \
+	bit<FLAG_OUTPUT_SIZE> stop_flag_read; \
 	if ((value)[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
 		if (count < stash_size) { \
-			// insert value without evicting \
 			stash.apply(PREPARE_STASH_INPUT(value, 1w1, 1w0), stash_read); \
-			//counter.write(0, counter_read + 1); \
 			if (key_increment == 1)  { \
 				inserted_keys.apply(COUNTER_INPUT_INCREMENT, inserted_keys_read); \
 			} \
 		} else { \
 			if (key_increment == 1) { \
 				discarded_keys.apply(COUNTER_INPUT_INCREMENT, discarded_keys_read); \
-				stop_flag.apply(FLAG_INPUT_SET, 1); \
+				stop_flag.apply(FLAG_INPUT_SET, stop_flag_read); \
 			} else { \
 				kicked_keys.apply(COUNTER_INPUT_INCREMENT, kicked_keys_read); \
 			} \
@@ -229,31 +235,39 @@
 	} \
 })
 
-#define PREPARE_STASH_INPUT(key_value, rw, evict) { key_value, rw, evict } 
+#define PREPARE_STASH_INPUT(key_value, rw, evict) ( key_value ++ rw ++ evict )
 
 #define COMPUTE_STASH_COUNT(value1, value2, value3, value4, value5, value6, value7, value8, output) { \
 	bit<32> temp_count = 0; \
-	if (value1[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 1; \
-	if (value2[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 1; \
-	if (value3[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 1; \
-	if (value4[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 1; \
-	if (value5[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 5; \
-	if (value6[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 5; \
-	if (value7[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 5; \
-	if (value8[KEY_SIZE-1:0] != KEY_SIZE_BIT) \
-		temp_count += 1; \
+	if (value1[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value2[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value3[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value4[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value5[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value6[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value7[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
+	if (value8[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
+		temp_count = temp_count + 1; \
+	} \
 	output = temp_count; \
 }
 // read till 8 values 
 #define READ_FROM_STASH(stash, value1, value2, value3, value4, value5, value6, value7, value8) { \
-	bit<KEY_VALUE_SIZE*STASH_LENGTH> stash_read; \
+	bit<(KEY_VALUE_SIZE*STASH_LENGTH)> stash_read; \
 	stash.apply(PREPARE_STASH_INPUT(KEY_VALUE_SIZE_BIT, 1w0, 1w0), stash_read); \
 	value1 = stash_read[KEY_VALUE_SIZE-1:0]; \
 	value2 = stash_read[2*KEY_VALUE_SIZE-1:KEY_VALUE_SIZE]; \

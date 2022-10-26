@@ -1,5 +1,5 @@
-#include <v1model.p4>
 #include <core.p4>
+#include <xsa.p4>
 #include "header_xsa.p4"
 
 typedef bit<9>  egressSpec_t;
@@ -37,16 +37,16 @@ UserExtern<bit<HASH_INPUT_SIZE>, bit<HASH_OUTPUT_SIZE>>(HASH_LATENCY) hash_secon
 // recirculator 
 UserExtern<bit<RECIRCULATION_INPUT_SIZE>, bit<RECIRCULATION_OUTPUT_SIZE>>(RECIRCULATION_LATENCY) recirculation_extern;
 // counters + flag
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) hit_counter;
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) recirculation_counter;
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) inserted_keys;
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) discarded_keys;
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) succesfull_recirculation;
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) kicked_keys;
-UserExtern<bit<COUNTER_INPUT_SIZE>, BIT<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) total_packets;
-UserExtern<bit<FLAG_INPUT_SIZE>, BIT<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) stop_flag;
-UserExtern<bit<FLAG_INPUT_SIZE>, BIT<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) recirculating;
-UserExtern<bit<FLAG_INPUT_SIZE>, BIT<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) new_recirculation;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) hit_counter;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) recirculation_counter;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) inserted_keys;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) discarded_keys;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) succesfull_recirculation;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) kicked_keys;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) total_packets;
+UserExtern<bit<FLAG_INPUT_SIZE>, bit<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) stop_flag;
+UserExtern<bit<FLAG_INPUT_SIZE>, bit<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) recirculating;
+UserExtern<bit<FLAG_INPUT_SIZE>, bit<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) new_recirculation;
 
 
 #define STASH_RECIRCULATE(flag) { \
@@ -119,10 +119,8 @@ header tcp_t {
 	bit<16> urgentPtr;
 }
 
-struct metadata {
-	@field_list(1)
+struct metadata_t {
 		bit<106> keyvalue;
-	@field_list(1)
 		bit<32> recirculation_counter;
 }
 
@@ -138,7 +136,7 @@ struct headers {
 
 parser MyParser(packet_in packet,
 		out headers hdr,
-		inout metadata meta,
+		inout metadata_t meta,
 		inout standard_metadata_t standard_metadata) {
 
 	state start {
@@ -168,7 +166,7 @@ parser MyParser(packet_in packet,
 	}
 
 	state rejection {
-		verify(false, error.ParserInvalidArgument);
+		//verify(false, error.ParserInvalidArgument);
 		transition accept;
 	}
 }
@@ -180,7 +178,7 @@ parser MyParser(packet_in packet,
  *************************************************************************/
 
 control MyIngress(inout headers hdr,
-		inout metadata meta,
+		inout metadata_t meta,
 		inout standard_metadata_t standard_metadata) {
 
 	//compute CH indices
@@ -203,9 +201,10 @@ control MyIngress(inout headers hdr,
 		bit<FLAG_OUTPUT_SIZE> stop_flag_value;
 
 		if (standard_metadata.parser_error != error.NoError) {
-			mark_to_drop(standard_metadata);
+			//mark_to_drop(standard_metadata);
 			//return should work as well
-			exit;
+			//TODO: Exit
+			//exit;
 		}
 
 
@@ -213,61 +212,61 @@ control MyIngress(inout headers hdr,
 		//TODO: implement stop flag through extern 
 		if (stop_flag_value == 0) {
 			//if (standard_metadata.instance_type != PKT_INSTANCE_TYPE_RESUBMIT) {
-				packet_key = 64w0 ++ hdr.ipv4.srcAddr;
-				READ_FROM_CUCKOO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
-				READ_FROM_CUCKOO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
-				READ_FROM_STASH(ch_first_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
+			packet_key = 64w0 ++ hdr.ipv4.srcAddr;
+			READ_FROM_CUCKOO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
+			READ_FROM_CUCKOO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
+			READ_FROM_STASH(ch_first_stash, stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result);
 
 
-				COMPUTE_STASH_COUNT(stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result, stash_count);
-				bool find_in_first = false; 
-				bool find_in_second = false; 
-				bool first_bucket_free = false;
-				bool second_bucket_free = false;
-				FIND_KEY_IN_BUCKET(packet_key, first_result, find_in_first);
-				FIND_KEY_IN_BUCKET(packet_key, second_result, find_in_second);
-				IS_FREE_SLOT_IN_BUCKET(first_result, first_bucket_free);
-				IS_FREE_SLOT_IN_BUCKET(second_result, second_bucket_free);
-				if (find_in_first) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (find_in_second) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_first_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_second_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_third_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_fourth_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_fifth_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_sixth_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_seventh_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (stash_eighth_result[95:0] == packet_key) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (first_bucket_free) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, temp, CH_FIRST_HASH_REVERSE, hash_first_level_first_table);
-					assert( temp == KEY_VALUE_SIZE_BIT);
-				} else if (second_bucket_free) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-					INSERT_INTO_CUCKOO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, temp, CH_SECOND_HASH_REVERSE, hash_second_level_first_table);
-					assert( temp == KEY_VALUE_SIZE_BIT);
-				} 
-				else {
-					INSERT_INTO_STASH(10w0 ++ packet_key, ch_first_stash, stash_count, 1);
-					//maybe updated by insert into stash
-					stop_flag.apply(FLAG_INPUT_READ, stop_flag_value);
-					if (stop_flag_value == 0) {
-						STASH_RECIRCULATE(1);
-					}
-				} 
-				// else just drop the key!
-				// for the moment just drop the packet after CH operations
-				mark_to_drop(standard_metadata);
+			COMPUTE_STASH_COUNT(stash_first_result, stash_second_result, stash_third_result, stash_fourth_result, stash_fifth_result, stash_sixth_result, stash_seventh_result, stash_eighth_result, stash_count);
+			bool find_in_first = false; 
+			bool find_in_second = false; 
+			bool first_bucket_free = false;
+			bool second_bucket_free = false;
+			FIND_KEY_IN_BUCKET(packet_key, first_result, find_in_first);
+			FIND_KEY_IN_BUCKET(packet_key, second_result, find_in_second);
+			IS_FREE_SLOT_IN_BUCKET(first_result, first_bucket_free);
+			IS_FREE_SLOT_IN_BUCKET(second_result, second_bucket_free);
+			if (find_in_first) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (find_in_second) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_first_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_second_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_third_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_fourth_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_fifth_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_sixth_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_seventh_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (stash_eighth_result[95:0] == packet_key) {
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+			} else if (first_bucket_free) {
+				bit<KEY_VALUE_SIZE> placeholder;
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+				INSERT_INTO_CUCKOO(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, placeholder, CH_FIRST_HASH_REVERSE, hash_first_level_first_table);
+			} else if (second_bucket_free) {
+				bit<KEY_VALUE_SIZE> placeholder;
+				hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+				INSERT_INTO_CUCKOO(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, placeholder, CH_SECOND_HASH_REVERSE, hash_second_level_first_table);
+			} 
+			else {
+				INSERT_INTO_STASH(10w0 ++ packet_key, ch_first_stash, stash_count, 1);
+				//maybe updated by insert into stash
+				stop_flag.apply(FLAG_INPUT_READ, stop_flag_value);
+				if (stop_flag_value == 0) {
+					//STASH_RECIRCULATE(1);
+				}
+			} 
+			// else just drop the key!
+			// for the moment just drop the packet after CH operations
+			//mark_to_drop(standard_metadata);
 			//} 
 			//else {
 			//	//recirculation
@@ -329,7 +328,7 @@ control MyIngress(inout headers hdr,
 			//	//debug.write(0, debug_value[31:0]);
 			//	//debug_1.write(0, debug_1_value[31:0]);
 			//} 
-		//}
+		}
 	}
 }
 
@@ -348,8 +347,8 @@ control MyDeparser(packet_out packet, in headers hdr, inout metadata_t metadata,
 /*************************************************************************
  ***********************  S W I T C H  *******************************
  *************************************************************************/
-XilinxPipeline(
+	XilinxPipeline(
 			MyParser(),
-			MyMatchAction(),
+			MyIngress(),
 			MyDeparser()
-		) main;
+		      ) main;
