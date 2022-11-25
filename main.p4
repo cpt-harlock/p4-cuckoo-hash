@@ -8,14 +8,6 @@ typedef bit<32> ip4Addr_t;
 
 // Parse ethernet or not
 #define PARSE_ETHERNET 1
-// Define constants for types of packets
-#define PKT_INSTANCE_TYPE_NORMAL 0
-#define PKT_INSTANCE_TYPE_INGRESS_CLONE 1
-#define PKT_INSTANCE_TYPE_EGRESS_CLONE 2
-#define PKT_INSTANCE_TYPE_COALESCED 3
-#define PKT_INSTANCE_TYPE_INGRESS_RECIRC 4
-#define PKT_INSTANCE_TYPE_REPLICATION 5
-#define PKT_INSTANCE_TYPE_RESUBMIT 6
 
 // one path of 512
 #define CH_LENGTH 512
@@ -79,12 +71,12 @@ header tcp_t {
 }
 
 struct metadata_t {
-        //recirculation flag
+	//recirculation flag
 	bit<1> axis_tdest;
-        //recirculation key_value
+	//recirculation key_value
 	bit<KEY_VALUE_SIZE> axis_tuser;
-        //recirculation counter
-        bit<32> axis_tid;
+	//recirculation counter
+	bit<32> axis_tid;
 }
 
 struct headers {
@@ -147,9 +139,9 @@ control MyIngress(inout headers hdr,
 		inout metadata_t meta,
 		inout standard_metadata_t standard_metadata) {
 
-        action mark_to_drop() {
-            standard_metadata.drop = 1;
-        }
+	action mark_to_drop() {
+		standard_metadata.drop = 1;
+	}
 	//compute CH indices
 	apply {
 		bit<KEY_SIZE> packet_key;
@@ -179,85 +171,97 @@ control MyIngress(inout headers hdr,
 		bit<COUNTER_OUTPUT_SIZE> total_packets_value;
 		bit<FLAG_OUTPUT_SIZE> stop_flag_value;
 		bit<FLAG_OUTPUT_SIZE> recirculating_flag_value;
-                bit<32> stash_counter_read;
+		bit<32> stash_counter_read;
 
 		if (standard_metadata.parser_error != error.NoError) {
-			//mark_to_drop(standard_metadata);
-			//return should work as well
-			//TODO: Exit
-			//exit;
-		}
+			mark_to_drop();
+			return;
+		} 
 
-
-		stop_flag.apply(FLAG_INPUT_READ, stop_flag_value);
-		if (stop_flag_value == 0) {
-                        // READING FLAG IN METADATA
-			if (meta.axis_tdest == 0) {
-				packet_key = 64w0 ++ hdr.ipv4.srcAddr;
-				// try insert in first table or hit
-				CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
-				if (ch_first_level_first_table_hit == 1) {
-					hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				} else if (ch_first_level_first_table_written == 0) {
-					CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
-					if (ch_second_level_first_table_hit == 1) {
+		if (standard_metadata.parsed_bytes != 0) {
+			stop_flag.apply(FLAG_INPUT_READ, stop_flag_value);
+			if (stop_flag_value == 0) {
+				// READING FLAG IN METADATA
+				// if normal packet
+				if (meta.axis_tdest == 0) {
+					// assembling key
+					packet_key = 64w0 ++ hdr.ipv4.srcAddr;
+					// try insert in first table or hit
+					CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
+					// if finding the key in the first table, update the HIT counter
+					if (ch_first_level_first_table_hit == 1) {
 						hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-					} else if (ch_second_level_first_table_written == 0) {
-						// try inserting into stash
-						STASH_READ_WRITE(10w0 ++ packet_key, ch_first_stash, 1w0, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
-						if (stash_hit == 1) {
+					} else if (ch_first_level_first_table_written == 0) {
+						// if written signal is low, try inserting in the second table
+						CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
+						// if hit in second table, update HIT counter 
+						if (ch_second_level_first_table_hit == 1) {
 							hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-						} else if (stash_written == 1) {
-							inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-						} else if (stash_discarded == 1) {
-							discarded_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-						}
-                                                if (stash_counter_read >= STASH_RECIRCULATION_THRESHOLD) {
-                                                        recirculating_flag.apply(FLAG_INPUT_SET, recirculating_flag_value);
-                                                        // if not already recirculating
-                                                        if (recirculating_flag_value == 0) {
-						               meta.axis_tuser = stash_output_value;
-                                                               meta.axis_tdest = 1;
-                                                               meta.axis_tid = 0;
-                                                        }
-                                                }
+						} else if (ch_second_level_first_table_written == 0) {
+							// try inserting into stash
+							STASH_READ_WRITE(10w0 ++ packet_key, ch_first_stash, 1w0, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
+							// stash hit, update HIT counter
+							if (stash_hit == 1) {
+								hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+							} else if (stash_written == 1) {
+								// stash written -> we inserted a new key
+								inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+							} else if (stash_discarded == 1) {
+								// discarded keys when can't be inserted into the stash
+								discarded_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+							}
+							if (stash_counter_read >= STASH_RECIRCULATION_THRESHOLD) {
+								recirculating_flag.apply(FLAG_INPUT_SET, recirculating_flag_value);
+								// if not already recirculating
+								if (recirculating_flag_value == 0) {
+									meta.axis_tuser = stash_output_value;
+									meta.axis_tdest = 1;
+									meta.axis_tid = 0;
+								}
+							}
 
+						} else {
+							inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
+						}
 					} else {
 						inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
 					}
 				} else {
-					inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-				}
-			} else {
-                                meta.axis_tid = meta.axis_tid + 1;
-                                if (meta.axis_tid > LOOP_LIMIT) {
-                                        //mark_to_drop();
-                                        // reset recirculating value to allow new recirculations
-                                        recirculating_flag.apply(FLAG_INPUT_RESET, recirculating_flag_value);
-                                        // add statistics for recirculation
-                                        return;
-                                }
-				bit<KEY_VALUE_SIZE> recirculating_value = meta.axis_tuser;
-				//insert into first cuckoo
-				CUCKOO_READ_WRITE_EVICT(recirculating_value, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
-				//insert into second cuckoo
-				CUCKOO_READ_WRITE_EVICT(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
-                                //insert into stash, evicting the oldest value (that just recirculated, being inserted in the ch first)
-				STASH_READ_WRITE(10w0 ++ packet_key, ch_first_stash, 1w1, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
-                                // using discarded to signal freed slot in the stash 
-                                if (stash_discarded == 1) {
-                                        // drop packet if recirculation was successfull
-                                        //mark_to_drop();
-                                        // shouldn't need to reset recirculate flag ...
-                                        meta.axis_tdest = 0;
-                                        // reset recirculating value to allow new recirculations
-                                        recirculating_flag.apply(FLAG_INPUT_RESET, recirculating_flag_value);
+					// RECIRCULATING PACKET 
+					// increasing recirculation counter
+					meta.axis_tid = meta.axis_tid + 1;
+					if (meta.axis_tid > LOOP_LIMIT) {
+						mark_to_drop();
+						// reset recirculating value to allow new recirculations
+						recirculating_flag.apply(FLAG_INPUT_RESET, recirculating_flag_value);
+						//TODO: add statistics for recirculation
+						// setting the stop flag
+						bit<1> _placeholder_read;
+						stop_flag.apply(FLAG_INPUT_SET, _placeholder_read);
+						return;
+					}
+					bit<KEY_VALUE_SIZE> recirculating_value = meta.axis_tuser;
+					//insert into first cuckoo
+					CUCKOO_READ_WRITE_EVICT(recirculating_value, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
+					//insert into second cuckoo
+					CUCKOO_READ_WRITE_EVICT(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
+					//insert into stash, evicting the oldest value (that just recirculated, being inserted in the ch first)
+					STASH_READ_WRITE(10w0 ++ packet_key, ch_first_stash, 1w1, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
+					// using discarded to signal freed slot in the stash 
+					if (stash_discarded == 1) {
+						// drop packet if recirculation was successfull
+						//mark_to_drop();
+						// shouldn't need to reset recirculate flag ...
+						meta.axis_tdest = 0;
+						// reset recirculating value to allow new recirculations
+						recirculating_flag.apply(FLAG_INPUT_RESET, recirculating_flag_value);
 
-                                } else {
-                                        // new recirculation key
-                                        meta.axis_tuser = stash_output_value;
-                                }
-   
+					} else {
+						// new recirculation key
+						meta.axis_tuser = stash_output_value;
+					}
+
+				}
 			}
 		}
 	}
@@ -271,9 +275,9 @@ control MyIngress(inout headers hdr,
 
 control MyDeparser(packet_out packet, in headers hdr, inout metadata_t metadata, inout standard_metadata_t standard_metadata) {
 	apply {
-             packet.emit(hdr.ethernet);
-             packet.emit(hdr.ipv4);
-             packet.emit(hdr.tcp);
+		packet.emit(hdr.ethernet);
+		packet.emit(hdr.ipv4);
+		packet.emit(hdr.tcp);
 	}
 }
 

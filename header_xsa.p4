@@ -3,7 +3,7 @@
 #define KEY_SIZE 96
 #define KEY_SIZE_BIT 96w0
 #
-#define INDEX_SIZE 32
+#define INDEX_SIZE 5
 // ch register
 //1 additional bit for R/W
 #define REGISTER_INPUT_SIZE (KEY_VALUE_SIZE+1+INDEX_SIZE) 
@@ -78,7 +78,7 @@
 			hasher.apply( hash_prefix ++ (value)[KEY_SIZE-1:0] , temp_hash); \
 		} \
 		temp_hash = temp_hash % cuckoo_length; \
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash, value, 1w0), temp_cuckoo_output); \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash[INDEX_SIZE-1:0], value, 1w0), temp_cuckoo_output); \
                 SPLIT_CUCKOO_OUTPUT(temp_cuckoo_output, output_value, hit, written); \
 	} else { \
 		output_value = value; \
@@ -96,7 +96,7 @@
 			hasher.apply( hash_prefix ++ (value)[KEY_SIZE-1:0] , temp_hash); \
 		} \
 		temp_hash = temp_hash % cuckoo_length; \
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash, value, 1w1), temp_cuckoo_output); \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash[INDEX_SIZE-1:0], value, 1w1), temp_cuckoo_output); \
                 SPLIT_CUCKOO_OUTPUT(temp_cuckoo_output, output_value, hit, written); \
 	} else { \
 		output_value = value; \
@@ -104,7 +104,7 @@
 	} \
 }
 
-#define PREPARE_STASH_INPUT(key_value, evict) ( key_value ++ evict )
+#define PREPARE_STASH_INPUT(key_value, evict) ( evict ++ key_value )
 #define SPLIT_STASH_OUTPUT(output_value, value, hit, written, discarded, counter) { \ 
     value = output_value[KEY_VALUE_SIZE-1:0]; \
     hit = output_value[KEY_VALUE_SIZE:KEY_VALUE_SIZE]; \
