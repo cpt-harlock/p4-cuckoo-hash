@@ -3,7 +3,7 @@
 #define KEY_SIZE 96
 #define KEY_SIZE_BIT 96w0
 #
-#define INDEX_SIZE 5
+#define INDEX_SIZE 10
 // ch register
 //1 additional bit for R/W
 #define REGISTER_INPUT_SIZE (KEY_VALUE_SIZE+1+INDEX_SIZE) 
@@ -43,7 +43,7 @@
 	#define STASH_RECIRCULATION_THRESHOLD 1
 #endif
 #ifndef LOOP_LIMIT
-	#define LOOP_LIMIT 50
+	#define LOOP_LIMIT 200
 #endif
 #
 #define STASH_LENGTH 8
@@ -68,7 +68,7 @@
     written = output_value[KEY_VALUE_SIZE+1:KEY_VALUE_SIZE+1]; \
 }
 
-#define CUCKOO_READ_WRITE(value, hash_prefix, cuckoo, cuckoo_length, output_value, hit, written, reverse, hasher) { \
+#define CUCKOO_READ_WRITE(value, hash_prefix, cuckoo, cuckoo_length, output_value, hit, written, reverse, hasher, evict) { \
 	bit<HASH_OUTPUT_SIZE> temp_hash; \
         bit<REGISTER_OUTPUT_SIZE> temp_cuckoo_output; \
 	if ((value)[KEY_SIZE-1:0] != KEY_SIZE_BIT) { \
@@ -78,7 +78,7 @@
 			hasher.apply( hash_prefix ++ (value)[KEY_SIZE-1:0] , temp_hash); \
 		} \
 		temp_hash = temp_hash % cuckoo_length; \
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash[INDEX_SIZE-1:0], value, 1w0), temp_cuckoo_output); \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash[INDEX_SIZE-1:0], evict, value), temp_cuckoo_output); \
                 SPLIT_CUCKOO_OUTPUT(temp_cuckoo_output, output_value, hit, written); \
 	} else { \
 		output_value = value; \
@@ -96,7 +96,7 @@
 			hasher.apply( hash_prefix ++ (value)[KEY_SIZE-1:0] , temp_hash); \
 		} \
 		temp_hash = temp_hash % cuckoo_length; \
-		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash[INDEX_SIZE-1:0], value, 1w1), temp_cuckoo_output); \
+		cuckoo.apply(PREPARE_CUCKOO_INPUT(temp_hash[INDEX_SIZE-1:0], 1w1, value), temp_cuckoo_output); \
                 SPLIT_CUCKOO_OUTPUT(temp_cuckoo_output, output_value, hit, written); \
 	} else { \
 		output_value = value; \

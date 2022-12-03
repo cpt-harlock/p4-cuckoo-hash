@@ -20,20 +20,17 @@ typedef bit<32> ip4Addr_t;
 #define CH_FIRST_HASH_REVERSE 0
 #define CH_SECOND_HASH_REVERSE 1
 
-// ch tables
-UserExtern<bit<REGISTER_INPUT_SIZE>, bit<REGISTER_OUTPUT_SIZE>>(REGISTER_LATENCY) ch_first_level_first_table;
-UserExtern<bit<REGISTER_INPUT_SIZE>, bit<REGISTER_OUTPUT_SIZE>>(REGISTER_LATENCY) ch_second_level_first_table;
-// ch stash
-UserExtern<bit<STASH_INPUT_SIZE>, bit<STASH_OUTPUT_SIZE>>(STASH_LATENCY) ch_first_stash;
-// hashers 
-UserExtern<bit<HASH_INPUT_SIZE>, bit<HASH_OUTPUT_SIZE>>(HASH_LATENCY) hash_first_level_first_table;
-UserExtern<bit<HASH_INPUT_SIZE>, bit<HASH_OUTPUT_SIZE>>(HASH_LATENCY) hash_second_level_first_table;
-// counters + flag
-UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) hit_counter;
-UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) inserted_keys;
 UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) discarded_keys;
 UserExtern<bit<FLAG_INPUT_SIZE>, bit<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) stop_flag;
 UserExtern<bit<FLAG_INPUT_SIZE>, bit<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) recirculating_flag;
+UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) total_packets;
+UserExtern<bit<REGISTER_INPUT_SIZE>, bit<REGISTER_OUTPUT_SIZE>>(REGISTER_LATENCY) ch_first_level_first_table;
+UserExtern<bit<REGISTER_INPUT_SIZE>, bit<REGISTER_OUTPUT_SIZE>>(REGISTER_LATENCY) ch_second_level_first_table;
+UserExtern<bit<STASH_INPUT_SIZE>, bit<STASH_OUTPUT_SIZE>>(STASH_LATENCY) ch_first_stash;
+UserExtern<bit<HASH_INPUT_SIZE>, bit<HASH_OUTPUT_SIZE>>(HASH_LATENCY) hash_first_level_first_table;
+UserExtern<bit<HASH_INPUT_SIZE>, bit<HASH_OUTPUT_SIZE>>(HASH_LATENCY) hash_second_level_first_table;
+
+
 
 header ethernet_t {
 	macAddr_t dstAddr;
@@ -71,11 +68,8 @@ header tcp_t {
 }
 
 struct metadata_t {
-	//recirculation flag
 	bit<1> axis_tdest;
-	//recirculation key_value
-	bit<KEY_VALUE_SIZE> axis_tuser;
-	//recirculation counter
+	bit<42> axis_tuser;
 	bit<32> axis_tid;
 }
 
@@ -95,11 +89,8 @@ parser MyParser(packet_in packet,
 		inout standard_metadata_t standard_metadata) {
 
 	state start {
-#if PARSE_ETHERNET == 1
+		//transition parse_ip;
 		transition parse_ethernet;
-#else
-		transition parse_ip;
-#endif
 	}
 
 	state parse_ethernet { 
@@ -138,13 +129,19 @@ parser MyParser(packet_in packet,
 control MyIngress(inout headers hdr,
 		inout metadata_t meta,
 		inout standard_metadata_t standard_metadata) {
-
 	action mark_to_drop() {
 		standard_metadata.drop = 1;
 	}
-	//compute CH indices
+
 	apply {
 		bit<KEY_SIZE> packet_key;
+		bit<FLAG_INPUT_SIZE> stop_flag_input;
+		bit<COUNTER_OUTPUT_SIZE> total_packets_read;
+		bit<FLAG_OUTPUT_SIZE> stop_flag_read;
+		bit<FLAG_OUTPUT_SIZE> recirculating_flag_read;
+		bit<COUNTER_OUTPUT_SIZE> hit_counter_read;
+		bit<COUNTER_OUTPUT_SIZE> inserted_keys_read;
+		bit<COUNTER_OUTPUT_SIZE> discarded_keys_read;
 		bit<KEY_VALUE_SIZE> first_result;
 		bit<KEY_VALUE_SIZE> second_result;
 		bit<32> ch_first_level_first_table_index;
@@ -156,114 +153,67 @@ control MyIngress(inout headers hdr,
 		bit<1> stash_hit;
 		bit<1> stash_written;
 		bit<1> stash_discarded;
+		bit<32> stash_counter_read;
 		bit<KEY_VALUE_SIZE> stash_output_value;
 
-		bit<KEY_VALUE_SIZE> stash_first_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_second_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_third_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_fourth_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_fifth_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_sixth_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_seventh_result = 106w0;
-		bit<KEY_VALUE_SIZE> stash_eighth_result = 106w0;
-		bit<32> stash_count;
-		bit<COUNTER_OUTPUT_SIZE> hit_counter_read;
-		bit<COUNTER_OUTPUT_SIZE> total_packets_value;
-		bit<FLAG_OUTPUT_SIZE> stop_flag_value;
-		bit<FLAG_OUTPUT_SIZE> recirculating_flag_value;
-		bit<32> stash_counter_read;
-
 		if (standard_metadata.parser_error != error.NoError) {
-			mark_to_drop();
 			return;
-		} 
+		}
 
-		if (standard_metadata.parsed_bytes != 0) {
-			stop_flag.apply(FLAG_INPUT_READ, stop_flag_value);
-			if (stop_flag_value == 0) {
-				// READING FLAG IN METADATA
-				// if normal packet
-				if (meta.axis_tdest == 0) {
-					// assembling key
-					packet_key = 64w0 ++ hdr.ipv4.srcAddr;
-					// try insert in first table or hit
-					CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
-					// if finding the key in the first table, update the HIT counter
-					if (ch_first_level_first_table_hit == 1) {
-						hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-					} else if (ch_first_level_first_table_written == 0) {
-						// if written signal is low, try inserting in the second table
-						CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
-						// if hit in second table, update HIT counter 
-						if (ch_second_level_first_table_hit == 1) {
-							hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-						} else if (ch_second_level_first_table_written == 0) {
-							// try inserting into stash
-							STASH_READ_WRITE(10w0 ++ packet_key, ch_first_stash, 1w0, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
-							// stash hit, update HIT counter
-							if (stash_hit == 1) {
-								hit_counter.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-							} else if (stash_written == 1) {
-								// stash written -> we inserted a new key
-								inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-							} else if (stash_discarded == 1) {
-								// discarded keys when can't be inserted into the stash
-								discarded_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-							}
-							if (stash_counter_read >= STASH_RECIRCULATION_THRESHOLD) {
-								recirculating_flag.apply(FLAG_INPUT_SET, recirculating_flag_value);
-								// if not already recirculating
-								if (recirculating_flag_value == 0) {
-									meta.axis_tuser = stash_output_value;
-									meta.axis_tdest = 1;
-									meta.axis_tid = 0;
-								}
-							}
-
-						} else {
-							inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-						}
-					} else {
-						inserted_keys.apply(COUNTER_INPUT_INCREMENT, hit_counter_read);
-					}
-				} else {
-					// RECIRCULATING PACKET 
-					// increasing recirculation counter
-					meta.axis_tid = meta.axis_tid + 1;
-					if (meta.axis_tid > LOOP_LIMIT) {
-						mark_to_drop();
-						// reset recirculating value to allow new recirculations
-						recirculating_flag.apply(FLAG_INPUT_RESET, recirculating_flag_value);
-						//TODO: add statistics for recirculation
-						// setting the stop flag
-						bit<1> _placeholder_read;
-						stop_flag.apply(FLAG_INPUT_SET, _placeholder_read);
-						return;
-					}
-					bit<KEY_VALUE_SIZE> recirculating_value = meta.axis_tuser;
-					//insert into first cuckoo
-					CUCKOO_READ_WRITE_EVICT(recirculating_value, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table); 
-					//insert into second cuckoo
-					CUCKOO_READ_WRITE_EVICT(10w0 ++ packet_key, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table); 
-					//insert into stash, evicting the oldest value (that just recirculated, being inserted in the ch first)
-					STASH_READ_WRITE(10w0 ++ packet_key, ch_first_stash, 1w1, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
-					// using discarded to signal freed slot in the stash 
-					if (stash_discarded == 1) {
-						// drop packet if recirculation was successfull
-						//mark_to_drop();
-						// shouldn't need to reset recirculate flag ...
-						meta.axis_tdest = 0;
-						// reset recirculating value to allow new recirculations
-						recirculating_flag.apply(FLAG_INPUT_RESET, recirculating_flag_value);
-
-					} else {
-						// new recirculation key
-						meta.axis_tuser = stash_output_value;
-					}
-
-				}
+		total_packets.apply(COUNTER_INPUT_INCREMENT, total_packets_read);
+		// assembling key
+		if (meta.axis_tdest == 0) {
+			packet_key = 64w0 ++ hdr.ipv4.srcAddr;
+		} else {
+			packet_key = 54w0 ++ meta.axis_tuser;
+		}
+		// try insert in first table or hit
+		CUCKOO_READ_WRITE(10w0 ++ packet_key, CH_FIRST_HASH_KEY, ch_first_level_first_table, CH_LENGTH_BIT, first_result, ch_first_level_first_table_hit, ch_first_level_first_table_written, CH_FIRST_HASH_REVERSE, hash_first_level_first_table, meta.axis_tdest); 
+		// output value is evicted from first ch or it's the original key if not evicted
+		CUCKOO_READ_WRITE(first_result, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table, meta.axis_tdest); 
+		STASH_READ_WRITE(second_result, ch_first_stash, meta.axis_tdest, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
+		bool stash_threshold;
+		stash_threshold = stash_counter_read >= 4;
+		// a try
+		// nested if should work for variables
+		bit<2> recirc_input = FLAG_INPUT_READ;
+		if (meta.axis_tdest == 0) {
+			if (stash_threshold)
+				recirc_input = FLAG_INPUT_SET;
+		}
+		else {
+			if (meta.axis_tid >= LOOP_LIMIT || stash_discarded == 1 ) {
+				recirc_input = FLAG_INPUT_RESET;
 			}
 		}
+
+
+		// now I can apply recirculating_flag outside if
+		recirculating_flag.apply(recirc_input, recirculating_flag_read);
+		// again, variables if should work
+		if (meta.axis_tdest == 0) {
+			if (recirculating_flag_read == 0 && stash_threshold) {
+				meta.axis_tdest = 1;
+				meta.axis_tid = 0;
+			}	
+		}
+		else {
+			// DEBUG: LOOP LIMIT TO 1
+			mark_to_drop();
+			//if (stash_discarded == 1) {
+			//	// drop packet if recirculation was successfull
+			//	mark_to_drop();
+			//} 
+		}
+
+		// this part is common to both exec flows
+		if (meta.axis_tid >= LOOP_LIMIT) {
+			mark_to_drop();
+		}
+		// I can increase axis_tid without if, in case of normal packet is just unused
+		meta.axis_tid = meta.axis_tid + 1;
+		// again, this is common to both flows
+		meta.axis_tuser = stash_output_value[41:0];
 	}
 }
 
