@@ -35,7 +35,7 @@ UserExtern<bit<HASH_INPUT_SIZE>, bit<HASH_OUTPUT_SIZE>>(HASH_LATENCY) hash_secon
 header ethernet_t {
 	macAddr_t dstAddr;
 	macAddr_t srcAddr;
-	bit<16>   etherType; // == 0x0 when recirculating packet
+	bit<16>   etherType; 
 }
 
 header ipv4_t {
@@ -173,7 +173,7 @@ control MyIngress(inout headers hdr,
 		CUCKOO_READ_WRITE(first_result, CH_SECOND_HASH_KEY, ch_second_level_first_table, CH_LENGTH_BIT, second_result, ch_second_level_first_table_hit, ch_second_level_first_table_written, CH_SECOND_HASH_REVERSE, hash_second_level_first_table, meta.axis_tdest); 
 		STASH_READ_WRITE(second_result, ch_first_stash, meta.axis_tdest, stash_output_value, stash_hit, stash_written, stash_discarded, stash_counter_read);
 		bool stash_threshold;
-		stash_threshold = stash_counter_read >= 4;
+		stash_threshold = stash_counter_read >= 1;
 		// a try
 		// nested if should work for variables
 		bit<2> recirc_input = FLAG_INPUT_READ;
@@ -183,6 +183,7 @@ control MyIngress(inout headers hdr,
 		}
 		else {
 			if (meta.axis_tid >= LOOP_LIMIT || stash_discarded == 1 ) {
+				// Commented out for debug
 				recirc_input = FLAG_INPUT_RESET;
 			}
 		}
@@ -199,11 +200,11 @@ control MyIngress(inout headers hdr,
 		}
 		else {
 			// DEBUG: LOOP LIMIT TO 1
-			mark_to_drop();
-			//if (stash_discarded == 1) {
-			//	// drop packet if recirculation was successfull
-			//	mark_to_drop();
-			//} 
+			//mark_to_drop();
+			if (stash_discarded == 1) {
+				// drop packet if recirculation was successfull
+				mark_to_drop();
+			} 
 		}
 
 		// this part is common to both exec flows
