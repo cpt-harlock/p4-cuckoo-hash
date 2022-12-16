@@ -9,9 +9,8 @@ typedef bit<32> ip4Addr_t;
 // Parse ethernet or not
 #define PARSE_ETHERNET 1
 
-// one path of 512
-#define CH_LENGTH 512
-#define CH_LENGTH_BIT 32w512
+#define CH_LENGTH 1024
+#define CH_LENGTH_BIT 32w1024
 
 
 // hash keys
@@ -178,7 +177,8 @@ control MyIngress(inout headers hdr,
 		// nested if should work for variables
 		bit<2> recirc_input = FLAG_INPUT_READ;
 		if (meta.axis_tdest == 0) {
-			if (stash_threshold)
+			//if (stash_threshold)
+			if (stash_threshold && stash_discarded == 0)
 				recirc_input = FLAG_INPUT_SET;
 		}
 		else {
@@ -193,7 +193,7 @@ control MyIngress(inout headers hdr,
 		recirculating_flag.apply(recirc_input, recirculating_flag_read);
 		// again, variables if should work
 		if (meta.axis_tdest == 0) {
-			if (recirculating_flag_read == 0 && stash_threshold) {
+			if (recirculating_flag_read == 0 && stash_threshold && stash_discarded == 0) {
 				meta.axis_tdest = 1;
 				meta.axis_tid = 0;
 			}	
@@ -208,6 +208,7 @@ control MyIngress(inout headers hdr,
 		}
 
 		// this part is common to both exec flows
+		// for normal pkts is never true
 		if (meta.axis_tid >= LOOP_LIMIT) {
 			mark_to_drop();
 		}
