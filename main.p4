@@ -9,15 +9,26 @@ typedef bit<32> ip4Addr_t;
 // Parse ethernet or not
 #define PARSE_ETHERNET 1
 
-#define CH_LENGTH 1024
-#define CH_LENGTH_BIT 32w1024
+// define input size for hash32 extern
+#define HASH_PREFIX_WIDTH 8
+#define HASH_KEY_INPUT_WIDTH 128
+#define HASH_INPUT_WIDTH (HASH_PREFIX_WIDTH+HASH_KEY_INPUT_WIDTH)
+#define HASH_OUTPUT_WIDTH 32
 
+// define input size for CH/HT externs
+#define TABLES_KEY_INPUT_WIDTH 128
+#define TABLES_VALUE_INPUT_WIDTH 128
+#define TABLES_INDEX_INPUT_WIDTH 32
+// one additional bit to signal the extern to ignore the input as it's been already inserted/hit + evict signal
+// ORDER (Verilog concat): { evict, ignore, index, value, key } 
+#define TABLES_INPUT_WIDTH (TABLES_KEY_INPUT_WIDTH + TABLES_VALUE_INPUT_WIDTH + TABLES_INDEX_INPUT_WIDTH + 1 + 1)
+// additional hit/written bit   
+// ORDER (Verilog concat): {  w/h, value, key }
+#define TABLES_OUTPUT_WIDTH (TABLES_KEY_INPUT_WIDTH +TABLES_VALUE_INPUT_WIDTH + 1)
 
 // hash keys
 #define CH_FIRST_HASH_KEY 8w0
 #define CH_SECOND_HASH_KEY 8w7
-#define CH_FIRST_HASH_REVERSE 0
-#define CH_SECOND_HASH_REVERSE 1
 
 UserExtern<bit<COUNTER_INPUT_SIZE>, bit<COUNTER_OUTPUT_SIZE>>(COUNTER_LATENCY) discarded_keys;
 UserExtern<bit<FLAG_INPUT_SIZE>, bit<FLAG_OUTPUT_SIZE>>(FLAG_LATENCY) stop_flag;
